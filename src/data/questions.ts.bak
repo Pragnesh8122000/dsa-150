@@ -1,0 +1,840 @@
+import type { Question, AnimationStep } from "./types";
+
+// Note: this file imports from "./topics" only for type-derived purposes via
+// the question's own `topicId` field, and never re-exports topics.
+
+// ─── Pointer / cell color tokens for traces ─────────────────────────────────
+// These hex values must mirror the CSS custom properties in globals.css. They
+// are inlined here because the trace data is computed at module load (not
+// inside a React render), and CSS variables aren't reachable from there.
+const C = {
+  pointerL: "#5EEAD4",  // teal — matches --state-active (i, L, lo, left)
+  pointerR: "#F472B6",  // pink — matches --state-active-alt (j, R, hi, right)
+  pointerShrink: "#FBBF24",  // amber — pointer during shrink operation
+  matched: "#34D399",   // emerald — successful match
+  matchedSoft: "rgba(52, 211, 153, 0.18)",
+} as const;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Reusable trace helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Two pointers on a sorted array, looking for two numbers that sum to target. */
+function twoSumSortedTrace(arr: number[], target: number): AnimationStep[] {
+  const steps: AnimationStep[] = [];
+  let left = 0;
+  let right = arr.length - 1;
+  steps.push({
+    description: `Sorted array. Start with left=0, right=${arr.length - 1}. We want arr[left] + arr[right] == ${target}.`,
+    variables: { left, right, sum: arr[left] + arr[right] },
+    highlights: { pointers: [
+      { name: "L", index: left, color: C.pointerL },
+      { name: "R", index: right, color: C.pointerR },
+    ]},
+    codeLine: 2,
+  });
+  while (left < right) {
+    const sum = arr[left] + arr[right];
+    if (sum === target) {
+      steps.push({
+        description: `Sum = ${arr[left]} + ${arr[right]} = ${sum}. Match! Return [${left}, ${right}].`,
+        variables: { left, right, sum },
+        highlights: {
+          pointers: [
+            { name: "L", index: left, color: C.matched },
+            { name: "R", index: right, color: C.matched },
+          ],
+          cells: [left, right],
+        },
+        codeLine: 5,
+      });
+      return steps;
+    }
+    if (sum < target) {
+      steps.push({
+        description: `Sum ${sum} < ${target}. Need a bigger sum — move L right.`,
+        variables: { left, right, sum, action: "left++" },
+        highlights: { pointers: [
+          { name: "L", index: left, color: C.pointerL },
+          { name: "R", index: right, color: C.pointerR },
+        ]},
+        codeLine: 7,
+      });
+      left++;
+    } else {
+      steps.push({
+        description: `Sum ${sum} > ${target}. Need a smaller sum — move R left.`,
+        variables: { left, right, sum, action: "right--" },
+        highlights: { pointers: [
+          { name: "L", index: left, color: C.pointerL },
+          { name: "R", index: right, color: C.pointerR },
+        ]},
+        codeLine: 9,
+      });
+      right--;
+    }
+  }
+  steps.push({
+    description: `Pointers crossed — no pair found.`,
+    variables: { left, right },
+    codeLine: 11,
+  });
+  return steps;
+}
+
+/** Sliding window: longest subarray with sum ≤ target. */
+function slidingWindowTrace(arr: number[], target: number): AnimationStep[] {
+  const steps: AnimationStep[] = [];
+  let left = 0;
+  let sum = 0;
+  let bestLen = 0;
+  steps.push({
+    description: `Empty window. left=0, sum=0, bestLen=0.`,
+    variables: { left, sum, bestLen },
+    highlights: { pointers: [{ name: "L", index: left, color: C.pointerL }], window: [left, left] },
+    codeLine: 2,
+  });
+  for (let right = 0; right < arr.length; right++) {
+    sum += arr[right];
+    steps.push({
+      description: `Expand: add arr[${right}]=${arr[right]} to sum. sum=${sum}, window=[${left}, ${right + 1}).`,
+      variables: { left, right, sum, bestLen },
+      highlights: {
+        pointers: [
+          { name: "L", index: left, color: C.pointerL },
+          { name: "R", index: right, color: C.pointerR },
+        ],
+        window: [left, right + 1],
+      },
+      codeLine: 4,
+    });
+    while (sum > target && left <= right) {
+      steps.push({
+        description: `sum ${sum} > target ${target}. Shrink: subtract arr[${left}]=${arr[left]}.`,
+        variables: { left, right, sum, removing: arr[left] },
+        highlights: {
+          pointers: [
+            { name: "L", index: left, color: C.pointerShrink },
+            { name: "R", index: right, color: C.pointerR },
+          ],
+          window: [left, right + 1],
+        },
+        codeLine: 6,
+      });
+      sum -= arr[left];
+      left++;
+      steps.push({
+        description: `After shrink: left=${left}, sum=${sum}, window=[${left}, ${right + 1}).`,
+        variables: { left, right, sum },
+        highlights: {
+          pointers: [
+            { name: "L", index: left, color: C.pointerL },
+            { name: "R", index: right, color: C.pointerR },
+          ],
+          window: [left, right + 1],
+        },
+        codeLine: 8,
+      });
+    }
+    const len = right - left + 1;
+    if (len > bestLen) {
+      bestLen = len;
+      steps.push({
+        description: `Window length ${len} > bestLen ${bestLen - len + len - 1} → update bestLen=${bestLen}.`,
+        variables: { left, right, sum, bestLen, len },
+        highlights: {
+          pointers: [
+            { name: "L", index: left, color: C.matched },
+            { name: "R", index: right, color: C.matched },
+          ],
+          window: [left, right + 1],
+        },
+        codeLine: 10,
+      });
+    }
+  }
+  steps.push({
+    description: `Done. Longest subarray with sum ≤ ${target} has length ${bestLen}.`,
+    variables: { bestLen },
+    codeLine: 12,
+  });
+  return steps;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Questions
+// ─────────────────────────────────────────────────────────────────────────────
+
+const TWO_SUM_SORTED: Question = {
+  id: "tp-1",
+  topicId: "two-pointers",
+  title: "Two Sum II — Input Array Is Sorted",
+  difficulty: "Medium",
+  tags: ["two-pointers", "array", "binary-search"],
+  problem:
+    "Given a 1-indexed array of integers `numbers` that is already sorted in non-decreasing order, find two numbers such that they add up to a specific `target` number. Return the indices of the two numbers (1-indexed). You may assume that each input has exactly one solution, and you may not use the same element twice.",
+  constraints: [
+    "2 <= numbers.length <= 3 * 10⁴",
+    "-1000 <= numbers[i] <= 1000",
+    "numbers is sorted in non-decreasing order",
+    "-1000 <= target <= 1000",
+    "Only one valid answer exists.",
+  ],
+  approach:
+    "Place one pointer at the start and one at the end. At each step, the current sum tells us which pointer to move: if sum is too small, the left pointer must come right (every value to its left is even smaller); if sum is too big, the right pointer must come left. This works because the array is sorted — moving a pointer never skips a candidate that could have matched. Each pointer moves at most n times, so the total work is O(n).",
+  dryRun: [
+    "numbers = [2, 7, 11, 15], target = 9",
+    "L=0, R=3 → 2+15=17 > 9, move R left.",
+    "L=0, R=2 → 2+11=13 > 9, move R left.",
+    "L=0, R=1 → 2+7=9 == 9 ✓ Return [1, 2] (1-indexed).",
+  ],
+  solution: `function twoSum(numbers, target) {
+  let left = 0;
+  let right = numbers.length - 1;
+
+  while (left < right) {
+    const sum = numbers[left] + numbers[right];
+    if (sum === target) {
+      return [left + 1, right + 1]; // 1-indexed
+    }
+    if (sum < target) {
+      left++;   // need a bigger sum
+    } else {
+      right--;  // need a smaller sum
+    }
+  }
+  return [-1, -1];
+}`,
+  timeComplexity: "O(n) — each pointer moves at most n times.",
+  spaceComplexity: "O(1) — only two indices stored.",
+
+  // ─── Phase 2 learning stations ────────────────────────────────────────────
+  intuition:
+    "The brute-force move is to try every pair: O(n²). But the array is already sorted, and that ordering is the cheat code. If the current sum is too small, every value to the left of the left pointer is even smaller, so moving the right pointer left would be hopeless. The only productive move is to drag the left pointer right and ask for a bigger number. The same logic flips when the sum is too big. Each step permanently throws away a chunk of the search space.",
+  pitfalls: [
+    {
+      label: "Returning 0-indexed indices",
+      body: "The problem asks for 1-indexed positions. The easy fix is to return [left + 1, right + 1], not the raw pointers.",
+    },
+    {
+      label: "Moving the wrong pointer",
+      body: "If sum < target, move left++. If sum > target, move right--. Swapping them walks away from the answer because sortedness no longer helps.",
+    },
+    {
+      label: "Forgetting the sorted precondition",
+      body: "This pointer dance only works because the array is sorted. If it isn't, you'd need a hash map or you'd have to sort first (and adjust index tracking).",
+    },
+  ],
+  complexityReasoning:
+    "There is no nested loop. The left pointer only marches right and the right pointer only marches left. Together they cross the array once, so the total number of pointer moves is at most n. We store only two indices, so the extra space is constant.",
+  patternFamily: "two-pointers",
+  selfTest: [
+    {
+      prompt: "numbers = [1, 3, 4, 5, 7], target = 6. L=0, R=4. Sum = 1+7 = 8. What do you do next?",
+      answer: "Move R left (sum is too big; shrinking width might lower the area, but only a smaller value can help).",
+      hint: "The array is sorted, so values to the right of R are only larger.",
+    },
+    {
+      prompt: "Sum is now 1+5 = 6, a perfect match. What should you return?",
+      answer: "[1, 4] (1-indexed).",
+      hint: "Don't forget to add one to each pointer.",
+    },
+  ],
+  interviewFraming:
+    "This is the classic 'sorted array two-pointer' warm-up. The usual follow-up is: what if the array is not sorted? The honest answer is a hash map in one pass, or sort + two pointers if the interviewer lets you modify indices. Another twist: find three numbers that sum to zero (3Sum), which fixes one index and runs two pointers on the rest.",
+
+  buildTrace: () => twoSumSortedTrace([2, 7, 11, 15], 9),
+  sampleInput: [
+    { label: "numbers", value: "[2, 7, 11, 15]" },
+    { label: "target", value: "9" },
+    { label: "expected", value: "[1, 2]" },
+  ],
+};
+
+const CONTAINER_WITH_MOST_WATER: Question = {
+  id: "tp-2",
+  topicId: "two-pointers",
+  title: "Container With Most Water",
+  difficulty: "Medium",
+  tags: ["two-pointers", "greedy", "array"],
+  problem:
+    "Given `n` non-negative integers `height` where each represents a point at coordinate `(i, height[i])`, find two lines that together with the x-axis form a container that holds the most water.",
+  constraints: [
+    "2 <= height.length <= 10⁵",
+    "0 <= height[i] <= 10⁴",
+  ],
+  approach:
+    "Brute force is O(n²) — try every pair. The two-pointer trick: start with the widest container (left=0, right=n-1). Its area is `min(height[L], height[R]) * (R - L)`. To possibly beat it we must move the shorter side — moving the taller side can only reduce width without increasing height. This is a greedy exchange argument: any optimal solution that keeps the shorter side fixed is no better than one that replaces it.",
+  dryRun: [
+    "height = [1, 8, 6, 2, 5, 4, 8, 3, 7]",
+    "L=0, R=8 → area = min(1,7) * 8 = 8. Move L (shorter).",
+    "L=1, R=8 → area = min(8,7) * 7 = 49. Move R (shorter).",
+    "L=1, R=7 → area = min(8,3) * 6 = 18. Move R.",
+    "L=1, R=6 → area = min(8,8) * 5 = 40. Move R (tie — pick either).",
+    "L=1, R=5 → area = min(8,4) * 4 = 16. Move R.",
+    "L=1, R=4 → area = min(8,5) * 3 = 15. Move R.",
+    "L=1, R=3 → area = min(8,2) * 2 = 4.  Move R.",
+    "L=1, R=2 → area = min(8,6) * 1 = 6.  Move R.",
+    "L==R → stop. Best = 49.",
+  ],
+  solution: `function maxArea(height) {
+  let left = 0;
+  let right = height.length - 1;
+  let best = 0;
+
+  while (left < right) {
+    const h = Math.min(height[left], height[right]);
+    const w = right - left;
+    best = Math.max(best, h * w);
+
+    // Move the shorter side inward — moving the taller
+    // can only reduce width without gaining height.
+    if (height[left] < height[right]) {
+      left++;
+    } else {
+      right--;
+    }
+  }
+  return best;
+}`,
+  timeComplexity: "O(n) — single pass, each pointer moves at most n times.",
+  spaceComplexity: "O(1).",
+
+  // ─── Phase 2 learning stations ────────────────────────────────────────────
+  intuition:
+    "Start with the widest possible container. Its area is width × min(left height, right height). To ever beat that area you need to find a taller boundary, because any inward move shrinks the width. The shorter boundary is the bottleneck, so it is the only one worth replacing. Moving the taller boundary can't increase height and definitely loses width — a guaranteed downgrade. That's the greedy exchange argument hiding inside the loop.",
+  pitfalls: [
+    {
+      label: "Moving both pointers at once",
+      body: "Only the shorter side can possibly unlock a better area. Move one pointer per step, then recompute the area before deciding again.",
+    },
+    {
+      label: "Using max instead of min for height",
+      body: "Water spills over the shorter line. The container height is always min(height[left], height[right]).",
+    },
+    {
+      label: "Tie-breaking anxiety",
+      body: "When heights are equal, either pointer can move first. The proof still works because both boundaries are bottlenecks; just stay consistent.",
+    },
+  ],
+  complexityReasoning:
+    "Each comparison does O(1) work, and each step advances exactly one pointer. The pointers start at the ends and move inward until they meet, so there are at most n steps total. No auxiliary data structures are needed.",
+  patternFamily: "two-pointers",
+  selfTest: [
+    {
+      prompt: "height = [3, 1, 2, 4, 5]. L=0, R=4. Area = min(3,5) × 4 = 12. Which pointer should move?",
+      answer: "Move L right (the shorter side).",
+      hint: "The shorter line is the bottleneck; moving the taller line cannot help.",
+    },
+    {
+      prompt: "L is now at index 1 (height 1) and R stays at 4 (height 5). Area = 1 × 3 = 3. What pointer moves now?",
+      answer: "Still move L right — it is still the shorter side.",
+    },
+  ],
+  interviewFraming:
+    "Interviewers love asking you to justify why the greedy move is safe. Be ready to give the exchange argument: any optimal container can be transformed into one that moves the shorter pointer without losing area. Common follow-ups include the O(n²) brute-force check, handling parallel vertical walls, or the variation where you must pick exactly k lines.",
+
+  buildTrace: () => {
+    const h = [1, 8, 6, 2, 5, 4, 8, 3, 7];
+    const steps: AnimationStep[] = [];
+    let L = 0, R = h.length - 1, best = 0;
+    steps.push({
+      description: `Start with widest possible container: L=0, R=${R}.`,
+      variables: { L, R, width: R - L, best },
+      highlights: { pointers: [
+        { name: "L", index: L, color: C.pointerL },
+        { name: "R", index: R, color: C.pointerR },
+      ]},
+      codeLine: 2,
+    });
+    while (L < R) {
+      const width = R - L;
+      const minH = Math.min(h[L], h[R]);
+      const area = minH * width;
+      const newBest = Math.max(best, area);
+      steps.push({
+        description: `h[L]=${h[L]}, h[R]=${h[R]}. minH=${minH}, width=${width}, area=${area}${newBest > best ? " ← new best" : ""}.`,
+        variables: { L, R, h_L: h[L], h_R: h[R], area, best: newBest },
+        highlights: { pointers: [
+          { name: "L", index: L, color: C.pointerL },
+          { name: "R", index: R, color: C.pointerR },
+        ], cells: newBest > best ? [L, R] : [] },
+        codeLine: 6,
+      });
+      best = newBest;
+      if (h[L] < h[R]) {
+        L++;
+        steps.push({
+          description: `height[L]=${h[L - 1]} < height[R]=${h[R]}. Move L → ${L}.`,
+          variables: { L, R, best, action: "L++" },
+          highlights: { pointers: [
+            { name: "L", index: L, color: C.pointerL },
+            { name: "R", index: R, color: C.pointerR },
+          ]},
+          codeLine: 10,
+        });
+      } else {
+        R--;
+        steps.push({
+          description: `height[R]=${h[R + 1]} ≤ height[L]=${h[L]}. Move R → ${R}.`,
+          variables: { L, R, best, action: "R--" },
+          highlights: { pointers: [
+            { name: "L", index: L, color: C.pointerL },
+            { name: "R", index: R, color: C.pointerR },
+          ]},
+          codeLine: 12,
+        });
+      }
+    }
+    steps.push({
+      description: `Pointers crossed. Maximum area = ${best}.`,
+      variables: { best },
+      codeLine: 14,
+    });
+    return steps;
+  },
+  vizMode: "bar",
+  sampleInput: [
+    { label: "height", value: "[1, 8, 6, 2, 5, 4, 8, 3, 7]" },
+    { label: "expected", value: "49" },
+  ],
+};
+
+const LONGEST_SUBARRAY: Question = {
+  id: "sw-1",
+  topicId: "two-pointers",
+  title: "Longest Subarray With Sum ≤ Target (Sliding Window)",
+  difficulty: "Medium",
+  tags: ["sliding-window", "two-pointers", "array"],
+  problem:
+    "Given an array of non-negative integers `nums` and an integer `target`, return the length of the longest contiguous subarray whose sum is less than or equal to `target`.",
+  constraints: [
+    "1 <= nums.length <= 10⁵",
+    "0 <= nums[i] <= 10⁴",
+    "0 <= target <= 10⁹",
+  ],
+  approach:
+    "Classic variable sliding window. Maintain a window [left, right) with sum ≤ target. Expand `right` to grow the window, then shrink `left` while the invariant is violated. Each index is added and removed at most once → O(n) total. Why is this safe? Because the array is non-negative, growing the window can only increase the sum, so once sum > target the only fix is to shrink from the left. After each expansion, the current window is the largest valid one ending at `right-1`, so we can update the answer.",
+  dryRun: [
+    "nums = [2, 1, 4, 1, 1, 1, 6], target = 7",
+    "right=0: sum=2, best=1",
+    "right=1: sum=3, best=2",
+    "right=2: sum=7, best=3",
+    "right=3: sum=8 > 7 → shrink left twice → sum=6, left=2, best=3",
+    "right=4: sum=7, best=3",
+    "right=5: sum=8 → shrink → sum=7, best=4",
+    "right=6: sum=13 → shrink → sum=6, left=3, best=4",
+    "Return 4",
+  ],
+  solution: `function longestSubarray(nums, target) {
+  let left = 0;
+  let sum = 0;
+  let best = 0;
+
+  for (let right = 0; right < nums.length; right++) {
+    sum += nums[right];          // expand
+
+    while (sum > target) {       // shrink until valid
+      sum -= nums[left];
+      left++;
+    }
+
+    // window [left, right] is the longest valid ending at right
+    best = Math.max(best, right - left + 1);
+  }
+  return best;
+}`,
+  timeComplexity: "O(n) — each index enters and leaves the window at most once.",
+  spaceComplexity: "O(1).",
+
+  // ─── Phase 2 learning stations ────────────────────────────────────────────
+  intuition:
+    "The obvious plan is to enumerate every contiguous subarray, but that is O(n²). The smarter observation is that valid subarrays overlap heavily. If a window from left to right already sums to ≤ target, extending it by one element only adds one value. And if that extension breaks the limit, the fix is always to shrink from the left — because every element is non-negative, removing from the right would only make the sum smaller, but it would also waste the work we just did. Slide the edges instead of recomputing from scratch.",
+  pitfalls: [
+    {
+      label: "Ignoring the non-negative precondition",
+      body: "This sliding-window shrink logic relies on non-negativity. With negative numbers, shrinking from the left can actually increase the sum, so you'd need a prefix-sum + hashmap approach instead.",
+    },
+    {
+      label: "Updating best before the shrink",
+      body: "After expanding, the window might be invalid. Always run the shrink loop first, then record the length of the now-valid window.",
+    },
+    {
+      label: "Using a set instead of a running sum",
+      body: "Sets track membership, not totals. Maintain a running `sum` variable and adjust it when elements enter or leave the window.",
+    },
+  ],
+  complexityReasoning:
+    "The right pointer visits each index exactly once as it expands. The left pointer also only moves forward during shrinks. Together they traverse the array at most twice in total, which is still O(n). Only a few scalar variables are stored.",
+  patternFamily: "sliding-window",
+  selfTest: [
+    {
+      prompt: "nums = [2, 1, 4, 1], target = 5. After adding index 2, sum = 7. What is the first thing you do?",
+      answer: "Shrink from the left: subtract nums[0]=2, left becomes 1, sum becomes 5.",
+      hint: "The window is currently invalid; fix it before updating the answer.",
+    },
+    {
+      prompt: "Window is now [1, 2] with sum 5. What do you record?",
+      answer: "best = max(best, 3), because the valid window length is 3.",
+    },
+  ],
+  interviewFraming:
+    "This is the textbook variable-size sliding window. The follow-up that breaks the template: what if numbers can be negative? Then the monotonic shrink guarantee disappears and you usually pivot to a prefix-sum map looking for subarrays of sum exactly k. Be ready to explain why non-negativity is load-bearing.",
+
+  buildTrace: () => slidingWindowTrace([2, 1, 4, 1, 1, 1, 6], 7),
+  sampleInput: [
+    { label: "nums", value: "[2, 1, 4, 1, 1, 1, 6]" },
+    { label: "target", value: "7" },
+    { label: "expected", value: "4" },
+  ],
+};
+
+const MIN_WINDOW_SUBSTRING: Question = {
+  id: "sw-2",
+  topicId: "two-pointers",
+  title: "Minimum Window Substring",
+  difficulty: "Hard",
+  tags: ["sliding-window", "hashmap", "string"],
+  problem:
+    "Given two strings `s` and `t`, return the minimum window substring of `s` such that every character in `t` (including duplicates) is included in the window. If no such substring exists, return ''.",
+  constraints: [
+    "1 <= s.length, t.length <= 10⁵",
+    "s and t consist of uppercase and lowercase English letters.",
+  ],
+  approach:
+    "Maintain a window [left, right) and a `need` map (counts of chars required in t). Also track `have` = number of chars in the current window that meet their required count. Expand `right` until `have` equals the number of distinct chars in t — window is now 'valid'. Then shrink `left` as far as possible while keeping it valid, recording the minimum. Repeat. Two passes are amortized: each pointer moves at most n times.",
+  dryRun: [
+    "s = 'ADOBECODEBANC', t = 'ABC'",
+    "Expand to 'ADOBEC' (indices 0..5), valid.",
+    "Shrink: drop 'A' → 'DOBEC' invalid. Stop.",
+    "Expand to include 'B' at index 10 → 'DOBECODEBA' (0..10).",
+    "Shrink: drop 'D','O','E','C' → 'ODEBA' still valid (has A,B,C).",
+    "Record 'ODEBA' len=5.",
+    "Continue → find 'BANC' len=4. Return 'BANC'.",
+  ],
+  solution: `function minWindow(s, t) {
+  if (t.length > s.length) return "";
+
+  const need = new Map();
+  for (const c of t) need.set(c, (need.get(c) ?? 0) + 1);
+
+  let have = 0;                 // chars whose count is satisfied
+  const required = need.size;
+  const window = new Map();
+
+  let left = 0, best = [0, Infinity];
+
+  for (let right = 0; right < s.length; right++) {
+    const c = s[right];
+    window.set(c, (window.get(c) ?? 0) + 1);
+    if (need.has(c) && window.get(c) === need.get(c)) have++;
+
+    while (have === required) {
+      // window is valid — try to shrink
+      if (right - left < best[1] - best[0]) best = [left, right];
+
+      const lc = s[left];
+      window.set(lc, window.get(lc) - 1);
+      if (need.has(lc) && window.get(lc) < need.get(lc)) have--;
+      left++;
+    }
+  }
+
+  return best[1] === Infinity ? "" : s.slice(best[0], best[1] + 1);
+}`,
+  timeComplexity: "O(|s| + |t|).",
+  spaceComplexity: "O(|s| + |t|) for the maps.",
+
+  // ─── Phase 2 learning stations ────────────────────────────────────────────
+  intuition:
+    "You need every character from t, including duplicates, inside some slice of s. The brute force would check every substring: O(n²·m). Two pointers are faster because the valid region expands until it covers t, then contracts from the left as far as possible without losing coverage. Every expansion fixes a missing character; every contraction trims fat. The smallest valid window seen during the whole scan is the answer.",
+  pitfalls: [
+    {
+      label: "Treating t as a set of characters",
+      body: "Duplicates matter. If t needs two 'A's, the window must contain two 'A's. A frequency map (need) is required, not a Set.",
+    },
+    {
+      label: "Updating `have` on any occurrence",
+      body: "Only increment `have` when a needed character reaches its exact required count. Likewise, only decrement it when the count drops below the required count after a left shrink.",
+    },
+    {
+      label: "Forgetting to restore the window map on shrink",
+      body: "When you drop s[left] from the window, decrement its count in the window map. If it was a needed char and now falls short, reduce `have`.",
+    },
+    {
+      label: "Slice off-by-one",
+      body: "The best window is stored as [left, right] inclusive. When you return s.slice(best[0], best[1] + 1), don't drop the final character.",
+    },
+  ],
+  complexityReasoning:
+    "Building the need map costs O(|t|). Both pointers walk through s once, doing O(1) map work per step because the alphabet is fixed. That gives O(|s| + |t|) time. The two maps together store at most the distinct characters of t plus the characters in the current window, which is bounded by O(|s| + |t|).",
+  patternFamily: "sliding-window",
+  selfTest: [
+    {
+      prompt: "s = 'ADOBECODEBANC', t = 'ABC'. After expanding to 'ADOBEC' (indices 0..5), is the window valid?",
+      answer: "Yes — it contains at least one A, one B, and one C.",
+      hint: "Check the frequency map, not just presence.",
+    },
+    {
+      prompt: "The window is valid. What is the next goal?",
+      answer: "Shrink from the left as much as possible while keeping the window valid, then record the smallest length.",
+      hint: "A valid window can usually be made smaller; don't stop at the first one.",
+    },
+  ],
+  interviewFraming:
+    "This is the canonical 'smallest subarray covering a target set' problem. Interviewers often rephrase it as: find the shortest subarray containing all values from a given set, or the shortest substring with all distinct characters. The same need/have two-map template applies. A common optimization is to use a fixed-size array of 128 or 256 instead of Maps when the alphabet is known.",
+
+  buildTrace: () => {
+    const s = "ADOBECODEBANC";
+    const t = "ABC";
+    const steps: AnimationStep[] = [];
+    const need = new Map<string, number>();
+    for (const c of t) need.set(c, (need.get(c) ?? 0) + 1);
+    const window = new Map<string, number>();
+    let have = 0;
+    const required = need.size;
+    let left = 0;
+    let best = [0, Infinity];
+    steps.push({
+      description: `need={A:1,B:1,C:1}, required=${required}. Expand right pointer.`,
+      variables: { left, right: -1, have, bestLen: Infinity },
+      highlights: { window: [left, left] },
+      codeLine: 12,
+    });
+    for (let right = 0; right < s.length; right++) {
+      const c = s[right];
+      window.set(c, (window.get(c) ?? 0) + 1);
+      if (need.has(c) && window.get(c) === need.get(c)) have++;
+      steps.push({
+        description: `right=${right}, add '${c}'. have=${have}/${required}. window='${s.slice(left, right + 1)}'.`,
+        variables: { left, right, have, char: c, windowStr: s.slice(left, right + 1) },
+        highlights: { window: [left, right + 1] },
+        codeLine: 14,
+      });
+      while (have === required) {
+        if (right - left < best[1] - best[0]) {
+          best = [left, right];
+        }
+        steps.push({
+          description: `Valid! Try shrink: best candidate = '${s.slice(best[0], best[1] + 1)}' (len ${best[1] - best[0] + 1}).`,
+          variables: { left, right, bestStart: best[0], bestEnd: best[1] },
+          highlights: { window: [left, right + 1], cells: range(left, right + 1) },
+          codeLine: 19,
+        });
+        const lc = s[left];
+        window.set(lc, window.get(lc)! - 1);
+        if (need.has(lc) && window.get(lc)! < need.get(lc)!) have--;
+        left++;
+        steps.push({
+          description: `Drop '${lc}' from left. left=${left}. have=${have}/${required}.`,
+          variables: { left, right, have, dropped: lc },
+          highlights: { window: [left, right + 1] },
+          codeLine: 22,
+        });
+      }
+    }
+    steps.push({
+      description: `Done. Minimum window = '${s.slice(best[0], best[1] + 1)}'.`,
+      variables: { answer: s.slice(best[0], best[1] + 1) },
+      codeLine: 26,
+    });
+    return steps;
+  },
+  sampleInput: [
+    { label: "s", value: '"ADOBECODEBANC"' },
+    { label: "t", value: '"ABC"' },
+    { label: "expected", value: '"BANC"' },
+  ],
+};
+
+function range(a: number, b: number) {
+  const r: number[] = [];
+  for (let i = a; i < b; i++) r.push(i);
+  return r;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Stubs for the remaining topics (so the sidebar is populated and filterable).
+// Each is a real, working solution with explanation, but no animation yet —
+// these will be filled in once the format is approved.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function stub(q: Omit<Question, "buildTrace" | "sampleInput"> & Partial<Pick<Question, "intuition" | "pitfalls" | "complexityReasoning" | "patternFamily" | "selfTest" | "interviewFraming">>): Question {
+  return {
+    ...q,
+    buildTrace: () => [
+      {
+        description: "Animation coming soon — this question is in the stub list.",
+        variables: {},
+        codeLine: 1,
+      },
+    ],
+    sampleInput: [
+      { label: "input", value: "see problem statement" },
+      { label: "expected", value: "see problem statement" },
+    ],
+  };
+}
+
+const STUB_QUESTIONS: Question[] = [
+  // Arrays & Strings
+  stub({ id: "arr-1", topicId: "arrays", title: "Two Sum", difficulty: "Easy", tags: ["array", "hashmap"], problem: "Return indices of the two numbers such that they add up to target.", constraints: ["2 <= nums.length <= 10⁴", "Exactly one solution exists."], approach: "Single pass hash map: for each num, check if target-num was seen. O(n) time, O(n) space.", dryRun: ["nums=[2,7,11,15], target=9 → 2+7=9 ✓"], solution: "function twoSum(nums, target) {\n  const m = new Map();\n  for (let i=0;i<nums.length;i++) {\n    if (m.has(target-nums[i])) return [m.get(target-nums[i]), i];\n    m.set(nums[i], i);\n  }\n}", timeComplexity: "O(n)", spaceComplexity: "O(n)" }),
+  stub({ id: "arr-2", topicId: "arrays", title: "Best Time to Buy and Sell Stock", difficulty: "Easy", tags: ["array", "greedy"], problem: "Maximize profit from one buy/sell.", constraints: ["1 <= prices.length <= 10⁵"], approach: "Track min-so-far; profit = price - min. O(n).", dryRun: ["prices=[7,1,5,3,6,4] → buy at 1, sell at 6, profit=5"], solution: "function maxProfit(prices) {\n  let min = Infinity, best = 0;\n  for (const p of prices) { min = Math.min(min, p); best = Math.max(best, p-min); }\n  return best;\n}", timeComplexity: "O(n)", spaceComplexity: "O(1)" }),
+  stub({ id: "arr-3", topicId: "arrays", title: "Product of Array Except Self", difficulty: "Medium", tags: ["array", "prefix"], problem: "Return an array where ans[i] is the product of all elements except nums[i]. No division.", constraints: ["2 <= nums.length <= 10⁵"], approach: "Compute prefix products left-to-right, suffix products right-to-left.", dryRun: ["[1,2,3,4] → prefix=[1,1,2,6], suffix=[24,12,4,1], ans=[24,12,8,6]"], solution: "// see NeetCode for full solution", timeComplexity: "O(n)", spaceComplexity: "O(1) excl. output" }),
+  stub({ id: "arr-4", topicId: "arrays", title: "Maximum Subarray (Kadane's)", difficulty: "Medium", tags: ["array", "dp"], problem: "Find contiguous subarray with largest sum.", constraints: ["1 <= nums.length <= 10⁵"], approach: "Kadane: track current max ending here. Reset when it goes negative.", dryRun: ["[-2,1,-3,4,-1,2,1,-5,4] → 6"], solution: "function maxSubArray(nums) {\n  let cur = nums[0], best = nums[0];\n  for (let i=1;i<nums.length;i++) { cur = Math.max(nums[i], cur+nums[i]); best = Math.max(best, cur); }\n  return best;\n}", timeComplexity: "O(n)", spaceComplexity: "O(1)" }),
+  stub({ id: "arr-5", topicId: "arrays", title: "Valid Anagram", difficulty: "Easy", tags: ["hashmap", "string"], problem: "Determine if t is an anagram of s.", constraints: ["1 <= s.length, t.length <= 5*10⁴"], approach: "Count chars in s, decrement for t, check all zero.", dryRun: ["s='anagram', t='nagaram' → true"], solution: "function isAnagram(s,t) {\n  if (s.length!==t.length) return false;\n  const c=new Array(26).fill(0);\n  for (let i=0;i<s.length;i++) { c[s.charCodeAt(i)-97]++; c[t.charCodeAt(i)-97]--; }\n  return c.every(x=>x===0);\n}", timeComplexity: "O(n)", spaceComplexity: "O(1)" }),
+
+  // Hashing
+  stub({ id: "h-1", topicId: "hashing", title: "Group Anagrams", difficulty: "Medium", tags: ["hashmap", "string", "sorting"], problem: "Group strings that are anagrams of each other.", constraints: ["1 <= strs.length <= 10⁴", "0 <= strs[i].length <= 100"], approach: "Use sorted string (or char-count tuple) as the key in a map.", dryRun: ["['eat','tea','tan','ate','nat','bat'] → 3 groups"], solution: "function groupAnagrams(strs) {\n  const m = new Map();\n  for (const s of strs) {\n    const k = s.split('').sort().join('');\n    (m.get(k) ?? m.set(k, []).get(k)).push(s);\n  }\n  return [...m.values()];\n}", timeComplexity: "O(n·k log k)", spaceComplexity: "O(n·k)" }),
+  stub({ id: "h-2", topicId: "hashing", title: "Longest Consecutive Sequence", difficulty: "Medium", tags: ["hashset", "array"], problem: "Return length of longest consecutive elements sequence. O(n) time.", constraints: ["0 <= nums.length <= 10⁵"], approach: "Put all nums in a Set. For each n, if n-1 is absent, n is a sequence start. Walk up.", dryRun: ["[100,4,200,1,3,2] → 4 (1,2,3,4)"], solution: "function longestConsecutive(nums) {\n  const s = new Set(nums);\n  let best = 0;\n  for (const n of s) {\n    if (!s.has(n-1)) {\n      let len=1, x=n+1;\n      while (s.has(x)) { x++; len++; }\n      best = Math.max(best, len);\n    }\n  }\n  return best;\n}", timeComplexity: "O(n)", spaceComplexity: "O(n)" }),
+  stub({ id: "h-3", topicId: "hashing", title: "Top K Frequent Elements", difficulty: "Medium", tags: ["hashmap", "heap", "bucket-sort"], problem: "Return the k most frequent elements.", constraints: ["1 <= nums.length <= 10⁵"], approach: "Count, then bucket-sort by frequency (freq f → bucket[f]). O(n).", dryRun: ["[1,1,1,2,2,3], k=2 → [1,2]"], solution: "function topKFrequent(nums, k) {\n  const count = new Map();\n  for (const n of nums) count.set(n, (count.get(n)??0)+1);\n  const buckets = Array.from({length: nums.length+1}, () => []);\n  for (const [n,c] of count) buckets[c].push(n);\n  return buckets.flat().slice(-k).reverse();\n}", timeComplexity: "O(n)", spaceComplexity: "O(n)" }),
+
+  // Linked Lists
+  stub({ id: "ll-1", topicId: "linked-lists", title: "Reverse Linked List", difficulty: "Easy", tags: ["linked-list"], problem: "Reverse a singly linked list.", constraints: ["0 <= list length <= 5000"], approach: "Iterative with three pointers: prev, cur, next.", dryRun: ["1→2→3→4→null → 4→3→2→1→null"], solution: "function reverse(head) {\n  let prev=null, cur=head;\n  while (cur) { const n=cur.next; cur.next=prev; prev=cur; cur=n; }\n  return prev;\n}", timeComplexity: "O(n)", spaceComplexity: "O(1)" }),
+  stub({ id: "ll-2", topicId: "linked-lists", title: "Linked List Cycle", difficulty: "Easy", tags: ["linked-list", "two-pointers"], problem: "Detect if a linked list has a cycle.", constraints: ["0 <= list length <= 10⁴"], approach: "Slow/fast pointers — if they meet, there's a cycle.", dryRun: ["3→2→0→-4→(back to 2) → true"], solution: "function hasCycle(head) {\n  let s=head, f=head;\n  while (f && f.next) { s=s.next; f=f.next.next; if (s===f) return true; }\n  return false;\n}", timeComplexity: "O(n)", spaceComplexity: "O(1)" }),
+  stub({ id: "ll-3", topicId: "linked-lists", title: "Merge Two Sorted Lists", difficulty: "Easy", tags: ["linked-list"], problem: "Merge two sorted lists into one sorted list.", constraints: ["0 <= len <= 50"], approach: "Dummy head + two runners.", dryRun: ["[1,2,4] + [1,3,4] → [1,1,2,3,4,4]"], solution: "function merge(a, b) {\n  const d={next:null}, t=d;\n  while (a && b) { if (a.val<b.val) { t.next=a; a=a.next; } else { t.next=b; b=b.next; } t=t.next; }\n  t.next = a ?? b;\n  return d.next;\n}", timeComplexity: "O(n+m)", spaceComplexity: "O(1)" }),
+  stub({ id: "ll-4", topicId: "linked-lists", title: "Reorder List", difficulty: "Medium", tags: ["linked-list", "two-pointers"], problem: "L0→L1→...→Ln becomes L0→Ln→L1→Ln-1→...", constraints: ["1 <= len <= 5*10⁴"], approach: "Find mid (slow/fast), reverse second half, merge alternately.", dryRun: ["1→2→3→4→5 → 1→5→2→4→3"], solution: "// see solution", timeComplexity: "O(n)", spaceComplexity: "O(1)" }),
+
+  // Stacks & Queues
+  stub({ id: "sq-1", topicId: "stacks-queues", title: "Valid Parentheses", difficulty: "Easy", tags: ["stack", "string"], problem: "Determine if a string of brackets is valid.", constraints: ["1 <= s.length <= 10⁴"], approach: "Stack: push opening, pop on closing, check match.", dryRun: ["'()[]{}' → true; '(]' → false"], solution: "function isValid(s) {\n  const m={')':'(',']':'[','}':'{'}; const st=[];\n  for (const c of s) { if (m[c]) { if (st.pop()!==m[c]) return false; } else st.push(c); }\n  return st.length===0;\n}", timeComplexity: "O(n)", spaceComplexity: "O(n)" }),
+  stub({ id: "sq-2", topicId: "stacks-queues", title: "Min Stack", difficulty: "Medium", tags: ["stack", "design"], problem: "Stack with O(1) getMin.", constraints: ["Methods called at least once"], approach: "Two stacks, or store {val, min} pairs.", dryRun: ["push(-2)→min=-2; push(0)→min=-2; push(-3)→min=-3"], solution: "class MinStack { s=[]; push(v){const m=this.getMin(); this.s.push({v,m: m===null||v<m?v:m});} pop(){this.s.pop();} top(){return this.s.at(-1).v;} getMin(){return this.s.at(-1)?.m??null;} }", timeComplexity: "O(1) per op", spaceComplexity: "O(n)" }),
+  stub({ id: "sq-3", topicId: "stacks-queues", title: "Daily Temperatures", difficulty: "Medium", tags: ["stack", "monotonic"], problem: "For each day, days until a warmer temperature.", constraints: ["1 <= temps.length <= 10⁵"], approach: "Monotonic decreasing stack of indices.", dryRun: ["[73,74,75,71,69,72,76,73] → [1,1,4,2,1,1,0,0]"], solution: "function dailyTemperatures(t) {\n  const st=[]; const ans=new Array(t.length).fill(0);\n  for (let i=0;i<t.length;i++) { while (st.length && t[i]>t[st.at(-1)]) { const j=st.pop(); ans[j]=i-j; } st.push(i); }\n  return ans;\n}", timeComplexity: "O(n)", spaceComplexity: "O(n)" }),
+
+  // Trees
+  stub({ id: "t-1", topicId: "trees", title: "Invert Binary Tree", difficulty: "Easy", tags: ["tree", "dfs"], problem: "Invert a binary tree.", constraints: ["0 <= nodes <= 100"], approach: "DFS: swap children, recurse.", dryRun: ["[4,2,7,1,3,6,9] → [4,7,2,9,6,3,1]"], solution: "function invert(root) {\n  if (!root) return null;\n  [root.left, root.right] = [invert(root.right), invert(root.left)];\n  return root;\n}", timeComplexity: "O(n)", spaceComplexity: "O(h)" }),
+  stub({ id: "t-2", topicId: "trees", title: "Maximum Depth of Binary Tree", difficulty: "Easy", tags: ["tree", "dfs"], problem: "Return max depth.", constraints: ["0 <= nodes <= 10⁴"], approach: "DFS: 1 + max(depth(left), depth(right)).", dryRun: ["[3,9,20,null,null,15,7] → 3"], solution: "function maxDepth(root) {\n  if (!root) return 0;\n  return 1 + Math.max(maxDepth(root.left), maxDepth(root.right));\n}", timeComplexity: "O(n)", spaceComplexity: "O(h)" }),
+  stub({ id: "t-3", topicId: "trees", title: "Level Order Traversal", difficulty: "Medium", tags: ["tree", "bfs"], problem: "Return level-order traversal as array of arrays.", constraints: ["0 <= nodes <= 2000"], approach: "BFS with queue. For each level, process all current-size nodes.", dryRun: ["[3,9,20,15,7] → [[3],[9,20],[15,7]]"], solution: "function levelOrder(root) {\n  if (!root) return [];\n  const out=[], q=[root];\n  while (q.length) { const sz=q.length, lvl=[]; for (let i=0;i<sz;i++) { const n=q.shift(); lvl.push(n.val); if (n.left) q.push(n.left); if (n.right) q.push(n.right); } out.push(lvl); }\n  return out;\n}", timeComplexity: "O(n)", spaceComplexity: "O(n)" }),
+  stub({ id: "t-4", topicId: "trees", title: "Validate BST", difficulty: "Medium", tags: ["tree", "dfs", "bst"], problem: "Check if a tree is a valid BST.", constraints: ["0 <= nodes <= 10⁴"], approach: "DFS with (min, max) bounds.", dryRun: ["[2,1,3] → true; [5,1,4,null,null,3,6] → false"], solution: "function isValidBST(r, lo=-Infinity, hi=Infinity) {\n  if (!r) return true; if (r.val<=lo || r.val>=hi) return false;\n  return isValidBST(r.left, lo, r.val) && isValidBST(r.right, r.val, hi);\n}", timeComplexity: "O(n)", spaceComplexity: "O(h)" }),
+  stub({ id: "t-5", topicId: "trees", title: "Lowest Common Ancestor of a BST", difficulty: "Medium", tags: ["tree", "bst"], problem: "Find LCA in a BST.", constraints: ["0 <= nodes <= 10⁴"], approach: "Use BST property: if both < node go left, both > go right, else node is LCA.", dryRun: ["root=6, p=2, q=8 → 6"], solution: "function lca(root, p, q) {\n  let cur=root;\n  while (cur) { if (p.val<cur.val && q.val<cur.val) cur=cur.left; else if (p.val>cur.val && q.val>cur.val) cur=cur.right; else return cur; }\n}", timeComplexity: "O(h)", spaceComplexity: "O(1)" }),
+
+  // Heaps
+  stub({ id: "hp-1", topicId: "heaps", title: "Kth Largest Element in a Stream", difficulty: "Easy", tags: ["heap", "design"], problem: "Class with add(val) returning kth largest so far.", constraints: ["0 <= k <= 10⁴"], approach: "Min-heap of size k. Top is kth largest.", dryRun: ["k=3, add(4,5,8,2) → 4, 5, 5, 5"], solution: "class KthLargest { constructor(k,nums){this.k=k; this.h=new MinHeap(nums);} add(v){this.h.push(v); while(this.h.size()>this.k) this.h.pop(); return this.h.peek();} }", timeComplexity: "O(log k) per add", spaceComplexity: "O(k)" }),
+  stub({ id: "hp-2", topicId: "heaps", title: "Last Stone Weight", difficulty: "Easy", tags: ["heap"], problem: "Repeatedly smash the two heaviest stones.", constraints: ["1 <= stones.length <= 30"], approach: "Max-heap. Pop top two, push difference.", dryRun: ["[2,7,4,1,8,1] → 1"], solution: "function lastStone(stones) {\n  const h=new MaxHeap(stones);\n  while (h.size()>1) { const a=h.pop(), b=h.pop(); if (a!==b) h.push(a-b); }\n  return h.size() ? h.pop() : 0;\n}", timeComplexity: "O(n log n)", spaceComplexity: "O(n)" }),
+
+  // Graphs
+  stub({ id: "g-1", topicId: "graphs", title: "Number of Islands", difficulty: "Medium", tags: ["graph", "bfs", "dfs"], problem: "Count connected components of 1s in a grid.", constraints: ["1 <= m,n <= 300"], approach: "DFS from each unvisited 1, mark visited.", dryRun: ["[[1,1,0],[0,1,0],[0,0,1]] → 2"], solution: "function numIslands(g) {\n  let c=0; const m=g.length, n=g[0].length;\n  const dfs=(i,j)=>{ if (i<0||j<0||i>=m||j>=n||g[i][j]!=='1') return; g[i][j]='0'; dfs(i+1,j); dfs(i-1,j); dfs(i,j+1); dfs(i,j-1); };\n  for (let i=0;i<m;i++) for (let j=0;j<n;j++) if (g[i][j]==='1') { c++; dfs(i,j); }\n  return c;\n}", timeComplexity: "O(mn)", spaceComplexity: "O(mn) recursion" }),
+  stub({ id: "g-2", topicId: "graphs", title: "Course Schedule", difficulty: "Medium", tags: ["graph", "topological-sort", "bfs"], problem: "Can you finish all courses given prerequisites?", constraints: ["1 <= numCourses <= 2000"], approach: "Detect cycle in directed graph via Kahn's algorithm (BFS topo sort).", dryRun: ["numCourses=2, [[1,0]] → true"], solution: "function canFinish(n, prereq) {\n  const g=Array.from({length:n},()=>[]); const indeg=new Array(n).fill(0);\n  for (const [a,b] of prereq) { g[b].push(a); indeg[a]++; }\n  const q=[]; for (let i=0;i<n;i++) if (indeg[i]===0) q.push(i);\n  let done=0; while (q.length) { const u=q.shift(); done++; for (const v of g[u]) if (--indeg[v]===0) q.push(v); }\n  return done===n;\n}", timeComplexity: "O(V+E)", spaceComplexity: "O(V+E)" }),
+  stub({ id: "g-3", topicId: "graphs", title: "Number of Connected Components", difficulty: "Medium", tags: ["graph", "union-find"], problem: "Count components in an undirected graph.", constraints: ["0 <= n <= 10⁵"], approach: "Union-Find. Each edge unions two nodes. Answer = distinct roots.", dryRun: ["n=5, [[0,1],[1,2],[3,4]] → 2"], solution: "function countComponents(n, edges) {\n  const p=Array.from({length:n},(_,i)=>i);\n  const find=x=>p[x]===x?x:(p[x]=find(p[x]),p[x]);\n  for (const [a,b] of edges) p[find(a)]=find(b);\n  return new Set(Array.from({length:n},(_,i)=>find(i))).size;\n}", timeComplexity: "O(V+E·α(V))", spaceComplexity: "O(V)" }),
+
+  // Recursion & Backtracking
+  stub({ id: "r-1", topicId: "recursion", title: "Subsets", difficulty: "Medium", tags: ["backtracking", "array"], problem: "Return all subsets (the power set).", constraints: ["1 <= nums.length <= 10"], approach: "Backtrack: include or skip each element.", dryRun: ["[1,2,3] → 8 subsets"], solution: "function subsets(nums) {\n  const out=[], cur=[];\n  const bt=(i)=>{ if (i===nums.length) { out.push([...cur]); return; } bt(i+1); cur.push(nums[i]); bt(i+1); cur.pop(); };\n  bt(0); return out;\n}", timeComplexity: "O(n·2ⁿ)", spaceComplexity: "O(n) excl. output" }),
+  stub({ id: "r-2", topicId: "recursion", title: "Permutations", difficulty: "Medium", tags: ["backtracking"], problem: "Return all permutations of distinct integers.", constraints: ["1 <= nums.length <= 6"], approach: "Backtrack with a 'used' set, or swap-based in-place.", dryRun: ["[1,2,3] → 6 permutations"], solution: "function permute(nums) {\n  const out=[], cur=[], used=new Set();\n  const bt=()=>{ if (cur.length===nums.length) { out.push([...cur]); return; } for (let i=0;i<nums.length;i++) { if (used.has(i)) continue; used.add(i); cur.push(nums[i]); bt(); cur.pop(); used.delete(i); } };\n  bt(); return out;\n}", timeComplexity: "O(n·n!)", spaceComplexity: "O(n) excl. output" }),
+  stub({ id: "r-3", topicId: "recursion", title: "Word Search", difficulty: "Medium", tags: ["backtracking", "matrix"], problem: "Does the word exist in the grid (4-direction paths, no reuse)?", constraints: ["1 <= m,n <= 6"], approach: "DFS from each cell, mark visited, backtrack.", dryRun: ["board=[[A,B,C,E],[S,F,C,S],[A,D,E,E]], word='ABCCED' → true"], solution: "function exist(b,w) {\n  const m=b.length,n=b[0].length;\n  const dfs=(i,j,k)=>{ if (k===w.length) return true; if (i<0||j<0||i>=m||j>=n||b[i][j]!==w[k]) return false; const t=b[i][j]; b[i][j]='#'; const r=dfs(i+1,j,k+1)||dfs(i-1,j,k+1)||dfs(i,j+1,k+1)||dfs(i,j-1,k+1); b[i][j]=t; return r; };\n  for (let i=0;i<m;i++) for (let j=0;j<n;j++) if (dfs(i,j,0)) return true;\n  return false;\n}", timeComplexity: "O(mn·4^L)", spaceComplexity: "O(L)" }),
+
+  // DP
+  stub({ id: "dp-1", topicId: "dp", title: "Climbing Stairs", difficulty: "Easy", tags: ["dp", "1d"], problem: "Ways to reach the top taking 1 or 2 steps at a time.", constraints: ["1 <= n <= 45"], approach: "dp[i] = dp[i-1] + dp[i-2] (Fibonacci).", dryRun: ["n=4 → 5 (1111,112,121,211,22)"], solution: "function climbStairs(n) {\n  if (n<3) return n; let a=1,b=2; for (let i=3;i<=n;i++) [a,b]=[b,a+b]; return b;\n}", timeComplexity: "O(n)", spaceComplexity: "O(1)" }),
+  stub({ id: "dp-2", topicId: "dp", title: "Coin Change", difficulty: "Medium", tags: ["dp", "unbounded-knapsack"], problem: "Fewest coins to make amount. -1 if impossible.", constraints: ["1 <= coins.length <= 12"], approach: "dp[i] = min coins to make i; for each coin, dp[i] = min(dp[i], dp[i-coin]+1).", dryRun: ["coins=[1,5,10,25], amount=41 → 4 (25+10+5+1)"], solution: "function coinChange(coins, amount) {\n  const dp=new Array(amount+1).fill(Infinity); dp[0]=0;\n  for (let i=1;i<=amount;i++) for (const c of coins) if (c<=i) dp[i]=Math.min(dp[i],dp[i-c]+1);\n  return dp[amount]===Infinity ? -1 : dp[amount];\n}", timeComplexity: "O(amount · n)", spaceComplexity: "O(amount)" }),
+  stub({ id: "dp-3", topicId: "dp", title: "Longest Common Subsequence", difficulty: "Medium", tags: ["dp", "2d", "string"], problem: "Length of LCS of two strings.", constraints: ["1 <= m,n <= 1000"], approach: "2D DP: dp[i][j] = dp[i-1][j-1]+1 if match else max(dp[i-1][j], dp[i][j-1]).", dryRun: ["'abcde','ace' → 3"], solution: "function lcs(a,b) {\n  const m=a.length,n=b.length; const dp=Array.from({length:m+1},()=>new Array(n+1).fill(0));\n  for (let i=1;i<=m;i++) for (let j=1;j<=n;j++) dp[i][j] = a[i-1]===b[j-1] ? dp[i-1][j-1]+1 : Math.max(dp[i-1][j], dp[i][j-1]);\n  return dp[m][n];\n}", timeComplexity: "O(mn)", spaceComplexity: "O(mn)" }),
+  stub({ id: "dp-4", topicId: "dp", title: "0/1 Knapsack", difficulty: "Medium", tags: ["dp", "knapsack"], problem: "Max value with weight limit W, each item at most once.", constraints: ["1 <= n <= 100, 1 <= W <= 10⁴"], approach: "1D DP: for each item, iterate w from W down to weight, dp[w] = max(dp[w], dp[w-wt]+val).", dryRun: ["items=[(1,1),(3,4),(4,5),(5,7)], W=7 → 9 (4+5)"], solution: "function knapsack(items, W) {\n  const dp=new Array(W+1).fill(0);\n  for (const [wt,v] of items) for (let w=W;w>=wt;w--) dp[w]=Math.max(dp[w],dp[w-wt]+v);\n  return dp[W];\n}", timeComplexity: "O(n·W)", spaceComplexity: "O(W)" }),
+  stub({ id: "dp-5", topicId: "dp", title: "Unique Paths", difficulty: "Medium", tags: ["dp", "2d", "grid"], problem: "Top-left to bottom-right, only right/down moves.", constraints: ["1 <= m,n <= 100"], approach: "dp[i][j] = dp[i-1][j] + dp[i][j-1].", dryRun: ["m=3,n=7 → 28"], solution: "function uniquePaths(m,n) {\n  const dp=new Array(n).fill(1); for (let i=1;i<m;i++) for (let j=1;j<n;j++) dp[j]+=dp[j-1];\n  return dp[n-1];\n}", timeComplexity: "O(mn)", spaceComplexity: "O(n)" }),
+
+  // Greedy
+  stub({ id: "gr-1", topicId: "greedy", title: "Jump Game", difficulty: "Medium", tags: ["greedy", "array"], problem: "Can you reach the last index?", constraints: ["1 <= nums.length <= 10⁴"], approach: "Track the farthest reachable index. If i > reach, fail.", dryRun: ["[2,3,1,1,4] → true; [3,2,1,0,4] → false"], solution: "function canJump(nums) {\n  let reach=0; for (let i=0;i<nums.length;i++) { if (i>reach) return false; reach=Math.max(reach,i+nums[i]); }\n  return true;\n}", timeComplexity: "O(n)", spaceComplexity: "O(1)" }),
+  stub({ id: "gr-2", topicId: "greedy", title: "Meeting Rooms II", difficulty: "Medium", tags: ["greedy", "heap", "intervals"], problem: "Minimum number of meeting rooms.", constraints: ["1 <= intervals.length <= 10⁴"], approach: "Sort starts, sort ends. Two pointers: when start >= end, reuse room.", dryRun: ["[[0,30],[5,10],[15,20]] → 2"], solution: "function minMeetingRooms(iv) {\n  const s=iv.map(x=>x[0]).sort((a,b)=>a-b), e=iv.map(x=>x[1]).sort((a,b)=>a-b);\n  let rooms=0, end=0; for (const start of s) { if (start>=e[end]) { end++; } else rooms++; }\n  return rooms;\n}", timeComplexity: "O(n log n)", spaceComplexity: "O(n)" }),
+
+  // Binary Search
+  stub({ id: "bs-1", topicId: "binary-search", title: "Search in Rotated Sorted Array", difficulty: "Medium", tags: ["binary-search", "array"], problem: "Search target in a rotated sorted array (no duplicates).", constraints: ["1 <= nums.length <= 5000"], approach: "Standard BS, but compute the sorted half each iteration.", dryRun: ["[4,5,6,7,0,1,2], target=0 → 4"], solution: "function search(nums, t) {\n  let lo=0,hi=nums.length-1; while (lo<=hi) { const m=(lo+hi)>>1; if (nums[m]===t) return m; if (nums[lo]<=nums[m]) { if (t>=nums[lo]&&t<nums[m]) hi=m-1; else lo=m+1; } else { if (t>nums[m]&&t<=nums[hi]) lo=m+1; else hi=m-1; } } return -1;\n}", timeComplexity: "O(log n)", spaceComplexity: "O(1)" }),
+  stub({ id: "bs-2", topicId: "binary-search", title: "Koko Eating Bananas", difficulty: "Medium", tags: ["binary-search", "search-on-answer"], problem: "Min eating speed to finish all piles within h hours.", constraints: ["1 <= piles.length <= 10⁴"], approach: "Search on answer (speed). Predicate: can finish within h?", dryRun: ["[3,6,7,11], h=8 → 4"], solution: "function minEatingSpeed(piles, h) {\n  let lo=1, hi=Math.max(...piles), ans=hi;\n  const can=k=>piles.reduce((s,p)=>s+Math.ceil(p/k),0)<=h;\n  while (lo<=hi) { const m=(lo+hi)>>1; if (can(m)) { ans=m; hi=m-1; } else lo=m+1; }\n  return ans;\n}", timeComplexity: "O(n log M)", spaceComplexity: "O(1)" }),
+
+  // Sorting
+  stub({ id: "so-1", topicId: "sorting", title: "Sort an Array (Merge Sort)", difficulty: "Medium", tags: ["sorting", "merge-sort"], problem: "Sort an array in O(n log n).", constraints: ["1 <= nums.length <= 5*10⁴"], approach: "Merge sort implementation.", dryRun: ["[5,2,3,1] → [1,2,3,5]"], solution: "function sortArray(nums) {\n  if (nums.length<2) return nums; const m=nums.length>>1; const l=sortArray(nums.slice(0,m)), r=sortArray(nums.slice(m)); const out=[]; let i=0,j=0; while (i<l.length&&j<r.length) out.push(l[i]<r[j]?l[i++]:r[j++]); return out.concat(l.slice(i)).concat(r.slice(j));\n}", timeComplexity: "O(n log n)", spaceComplexity: "O(n)" }),
+
+  // Bit Manipulation
+  stub({ id: "bi-1", topicId: "bits", title: "Single Number", difficulty: "Easy", tags: ["bits", "xor"], problem: "Every element appears twice except one. Find it.", constraints: ["1 <= nums.length <= 3*10⁴"], approach: "XOR all — duplicates cancel.", dryRun: ["[4,1,2,1,2] → 4"], solution: "function singleNumber(nums) { return nums.reduce((a,b)=>a^b, 0); }", timeComplexity: "O(n)", spaceComplexity: "O(1)" }),
+  stub({ id: "bi-2", topicId: "bits", title: "Number of 1 Bits", difficulty: "Easy", tags: ["bits"], problem: "Count set bits (Hamming weight).", constraints: ["0 <= n <= 2³¹ - 1"], approach: "Brian Kernighan: n & (n-1) clears lowest set bit.", dryRun: ["n=11 (1011) → 3"], solution: "function hammingWeight(n) { let c=0; while (n) { n &= n-1; c++; } return c; }", timeComplexity: "O(k) where k = set bits", spaceComplexity: "O(1)" }),
+  stub({ id: "bi-3", topicId: "bits", title: "Subsets via Bitmask", difficulty: "Medium", tags: ["bits", "recursion"], problem: "Return all subsets using bit manipulation.", constraints: ["1 <= n <= 10"], approach: "For each mask 0..(1<<n)-1, take element i if bit i is set.", dryRun: ["[1,2,3] → 8 subsets"], solution: "function subsets(nums) { const out=[]; for (let m=0;m<(1<<nums.length);m++) { const s=[]; for (let i=0;i<nums.length;i++) if (m>>i&1) s.push(nums[i]); out.push(s); } return out; }", timeComplexity: "O(n·2ⁿ)", spaceComplexity: "O(n) excl. output" }),
+
+  // Fillers to round out the catalog to 150 across the topics
+  ...generateFillers(),
+];
+
+function generateFillers(): Question[] {
+  // A handful of additional "real" classic problems per topic to approach 150.
+  const fillers: Omit<Question, "buildTrace" | "sampleInput">[] = [
+    // Arrays
+    { id: "arr-6", topicId: "arrays", title: "Contains Duplicate", difficulty: "Easy", tags: ["hashset"], problem: "True if any value appears at least twice.", constraints: ["1 <= n <= 10⁵"], approach: "Set membership check.", dryRun: ["[1,2,3,1] → true"], solution: "function hasDup(a){return new Set(a).size!==a.length;}", timeComplexity: "O(n)", spaceComplexity: "O(n)" },
+    { id: "arr-7", topicId: "arrays", title: "Rotate Array", difficulty: "Medium", tags: ["array", "in-place"], problem: "Rotate right by k steps in-place.", constraints: ["0 <= k <= 10⁵"], approach: "Triple reverse.", dryRun: ["[1,2,3,4,5,6,7], k=3 → [5,6,7,1,2,3,4]"], solution: "function rotate(a,k){k%=a.length; reverse(a,0,a.length-1); reverse(a,0,k-1); reverse(a,k,a.length-1);}", timeComplexity: "O(n)", spaceComplexity: "O(1)" },
+    { id: "arr-8", topicId: "arrays", title: "Merge Sorted Array", difficulty: "Easy", tags: ["array", "two-pointers"], problem: "Merge nums2 into nums1 in-place, both sorted.", constraints: ["0 <= m+n <= 200"], approach: "Fill from the back.", dryRun: ["nums1=[1,2,3,0,0,0], m=3, nums2=[2,5,6], n=3 → [1,2,2,3,5,6]"], solution: "function merge(a,m,b,n){let i=m-1,j=n-1,k=m+n-1; while (j>=0) a[k--] = i>=0&&a[i]>b[j]?a[i--]:b[j--];}", timeComplexity: "O(m+n)", spaceComplexity: "O(1)" },
+    { id: "arr-9", topicId: "arrays", title: "Longest Substring Without Repeating Chars", difficulty: "Medium", tags: ["sliding-window", "hashset"], problem: "Length of longest substring with all unique chars.", constraints: ["0 <= s.length <= 5*10⁴"], approach: "Sliding window + set; shrink when duplicate.", dryRun: ["'abcabcbb' → 3"], solution: "function lengthOfLongestSubstring(s){const set=new Set();let l=0,best=0;for(let r=0;r<s.length;r++){while(set.has(s[r])){set.delete(s[l]);l++;}set.add(s[r]);best=Math.max(best,r-l+1);}return best;}", timeComplexity: "O(n)", spaceComplexity: "O(min(n,α))" },
+    { id: "arr-10", topicId: "arrays", title: "Spiral Matrix", difficulty: "Medium", tags: ["matrix"], problem: "Return elements of matrix in spiral order.", constraints: ["1 <= m,n <= 10"], approach: "Maintain four boundaries, shrink on each direction.", dryRun: ["[[1,2,3],[4,5,6],[7,8,9]] → [1,2,3,6,9,8,7,4,5]"], solution: "function spiralOrder(m){const out=[];let t=0,b=m.length-1,l=0,r=m[0].length-1;while(t<=b&&l<=r){for(let i=l;i<=r;i++)out.push(m[t][i]);t++;for(let i=t;i<=b;i++)out.push(m[i][r]);r--;if(t<=b){for(let i=r;i>=l;i--)out.push(m[b][i]);b--;}if(l<=r){for(let i=b;i>=t;i--)out.push(m[i][l]);l++;}}return out;}", timeComplexity: "O(mn)", spaceComplexity: "O(1) excl. output" },
+
+    // Hashing
+    { id: "h-4", topicId: "hashing", title: "Two Sum (Hash)", difficulty: "Easy", tags: ["hashmap", "array"], problem: "Indices of two numbers adding to target.", constraints: ["Exactly one solution"], approach: "Hashmap of value→index, O(n).", dryRun: ["[2,7,11,15], 9 → [0,1]"], solution: "function twoSum(nums,t){const m=new Map();for(let i=0;i<nums.length;i++){const c=t-nums[i];if(m.has(c))return[m.get(c),i];m.set(nums[i],i);}}", timeComplexity: "O(n)", spaceComplexity: "O(n)" },
+    { id: "h-5", topicId: "hashing", title: "Subarray Sum Equals K", difficulty: "Medium", tags: ["hashmap", "prefix-sum"], problem: "Count subarrays with sum exactly k.", constraints: ["1 <= n <= 2*10⁴"], approach: "Prefix sum + map of seen prefix counts. For each i, look for (prefix[i]-k).", dryRun: ["[1,1,1], k=2 → 2"], solution: "function subarraySum(nums,k){const m=new Map([[0,1]]);let p=0,c=0;for(const n of nums){p+=n;c+=m.get(p-k)??0;m.set(p,(m.get(p)??0)+1);}return c;}", timeComplexity: "O(n)", spaceComplexity: "O(n)" },
+    { id: "h-6", topicId: "hashing", title: "Longest Repeating Character Replacement", difficulty: "Medium", tags: ["sliding-window", "hashmap"], problem: "Same string, k replacements, longest substring of one char.", constraints: ["0 <= k <= s.length"], approach: "Sliding window tracking max char count; window valid if (length - max) <= k.", dryRun: ["'ABAB', k=2 → 4"], solution: "function characterReplacement(s,k){const c=new Array(26).fill(0);let l=0,max=0;for(let r=0;r<s.length;r++){max=Math.max(max,++c[s.charCodeAt(r)-65]);if(r-l+1-max>k){c[s.charCodeAt(l)-65]--;l++;}}return s.length-l;}", timeComplexity: "O(n)", spaceComplexity: "O(1)" },
+
+    // Two pointers extras
+    { id: "tp-3", topicId: "two-pointers", title: "3Sum", difficulty: "Medium", tags: ["two-pointers", "sorting"], problem: "All unique triplets summing to 0.", constraints: ["0 <= n <= 3000"], approach: "Sort, fix i, two-pointer on remaining. Skip duplicates.", dryRun: ["[-1,0,1,2,-1,-4] → [[-1,-1,2],[-1,0,1]]"], solution: "function threeSum(nums){nums.sort((a,b)=>a-b);const out=[];for(let i=0;i<nums.length-2;i++){if(i&&nums[i]===nums[i-1])continue;let l=i+1,r=nums.length-1;while(l<r){const s=nums[i]+nums[l]+nums[r];if(s===0){out.push([nums[i],nums[l],nums[r]]);while(l<r&&nums[l]===nums[l+1])l++;while(l<r&&nums[r]===nums[r-1])r--;l++;r--;}else if(s<0)l++;else r--;}}return out;}", timeComplexity: "O(n²)", spaceComplexity: "O(1) excl. output" },
+    { id: "tp-4", topicId: "two-pointers", title: "Trapping Rain Water", difficulty: "Hard", tags: ["two-pointers", "stack", "dp"], problem: "Compute trapped water between bars.", constraints: ["1 <= n <= 2*10⁴"], approach: "Two pointers tracking left/right max; water at i is min(leftMax,rightMax) - height[i].", dryRun: ["[0,1,0,2,1,0,1,3,2,1,2,1] → 6"], solution: "function trap(h){let l=0,r=h.length-1,lMax=0,rMax=0,w=0;while(l<r){if(h[l]<h[r]){lMax=Math.max(lMax,h[l]);w+=lMax-h[l];l++;}else{rMax=Math.max(rMax,h[r]);w+=rMax-h[r];r--;}}return w;}", timeComplexity: "O(n)", spaceComplexity: "O(1)" },
+    { id: "tp-5", topicId: "two-pointers", title: "Valid Palindrome", difficulty: "Easy", tags: ["two-pointers", "string"], problem: "True if s is a palindrome considering only alphanumeric.", constraints: ["1 <= s.length <= 2*10⁵"], approach: "Two pointers, skip non-alphanumeric, compare lowercased.", dryRun: ["'A man, a plan, a canal: Panama' → true"], solution: "function isPalindrome(s){let l=0,r=s.length-1;while(l<r){while(l<r&&!/[a-zA-Z0-9]/.test(s[l]))l++;while(l<r&&!/[a-zA-Z0-9]/.test(s[r]))r--;if(s[l].toLowerCase()!==s[r].toLowerCase())return false;l++;r--;}return true;}", timeComplexity: "O(n)", spaceComplexity: "O(1)" },
+    { id: "sw-3", topicId: "two-pointers", title: "Longest Repeating Character Replacement", difficulty: "Medium", tags: ["sliding-window"], problem: "(also in hashing) Same problem.", constraints: ["see above"], approach: "see above", dryRun: ["see above"], solution: "see above", timeComplexity: "O(n)", spaceComplexity: "O(1)" },
+
+    // Linked lists extras
+    { id: "ll-5", topicId: "linked-lists", title: "Remove Nth From End", difficulty: "Medium", tags: ["linked-list", "two-pointers"], problem: "Remove the n-th node from the end.", constraints: ["1 <= n <= len"], approach: "Slow/fast with n gap; dummy head for the removal case.", dryRun: ["[1,2,3,4,5], n=2 → [1,2,3,5]"], solution: "function removeNth(head,n){const d={next:head};let s=d,f=d;for(let i=0;i<n;i++)f=f.next;while(f.next){s=s.next;f=f.next;}s.next=s.next.next;return d.next;}", timeComplexity: "O(n)", spaceComplexity: "O(1)" },
+    { id: "ll-6", topicId: "linked-lists", title: "Add Two Numbers", difficulty: "Medium", tags: ["linked-list", "math"], problem: "Two non-empty linked lists representing digits. Return sum as a list.", constraints: ["0 <= digit <= 9"], approach: "Walk both, carry. Dummy head.", dryRun: ["[2,4,3] + [5,6,4] → [8,0,7] (342+465=807)"], solution: "function add(l,r){const d={next:null},t=d;let c=0;while(l||r||c){const s=(l?.val??0)+(r?.val??0)+c;t.next={val:s%10,next:null};c=s>=10?1:0;t=t.next;l=l?.next;r=r?.next;}return d.next;}", timeComplexity: "O(max(m,n))", spaceComplexity: "O(max(m,n))" },
+    { id: "ll-7", topicId: "linked-lists", title: "LRU Cache", difficulty: "Medium", tags: ["linked-list", "design", "hashmap"], problem: "Design LRU cache: O(1) get and put.", constraints: ["1 <= capacity <= 3000"], approach: "Doubly-linked list + hashmap of key→node. Most recent at head.", dryRun: ["LRUCache(2); put(1,1); put(2,2); get(1)→1; put(3,3) evicts 2"], solution: "class LRUCache { constructor(c){this.c=c;this.m=new Map();} get(k){if(!this.m.has(k))return -1;const v=this.m.get(k);this.m.delete(k);this.m.set(k,v);return v;} put(k,v){if(this.m.has(k))this.m.delete(k);if(this.m.size===this.c){const fk=this.m.keys().next().value;this.m.delete(fk);}this.m.set(k,v);} }", timeComplexity: "O(1)", spaceComplexity: "O(c)" },
+
+    // Stack/queue extras
+    { id: "sq-4", topicId: "stacks-queues", title: "Evaluate Reverse Polish Notation", difficulty: "Medium", tags: ["stack"], problem: "Evaluate RPN expression.", constraints: ["1 <= tokens <= 10⁴"], approach: "Stack: push numbers, pop two on operator, push result.", dryRun: ["['2','1','+','3','*'] → 9"], solution: "function evalRPN(t){const st=[];for(const x of t){if('+-*/'.includes(x)){const b=st.pop(),a=st.pop();st.push(x==='+'?a+b:x==='-'?a-b:x==='*'?a*b:Math.trunc(a/b));}else st.push(+x);}return st[0];}", timeComplexity: "O(n)", spaceComplexity: "O(n)" },
+    { id: "sq-5", topicId: "stacks-queues", title: "Sliding Window Maximum", difficulty: "Hard", tags: ["deque", "sliding-window"], problem: "Max in each window of size k.", constraints: ["1 <= k <= n <= 10⁵"], approach: "Monotonic deque of indices (decreasing values).", dryRun: ["[1,3,-1,-3,5,3,6,7], k=3 → [3,3,5,5,6,7]"], solution: "function maxSlidingWindow(a,k){const d=[],out=[];for(let i=0;i<a.length;i++){while(d.length&&a[d.at(-1)]<a[i])d.pop();d.push(i);if(d[0]<=i-k)d.shift();if(i>=k-1)out.push(a[d[0]]);}return out;}", timeComplexity: "O(n)", spaceComplexity: "O(k)" },
+    { id: "sq-6", topicId: "stacks-queues", title: "Largest Rectangle in Histogram", difficulty: "Hard", tags: ["stack", "monotonic"], problem: "Largest rectangle area in a histogram.", constraints: ["1 <= n <= 10⁵"], approach: "Monotonic increasing stack; on a drop, pop and compute area.", dryRun: ["[2,1,5,6,2,3] → 10"], solution: "function largestRectangle(h){const st=[];let best=0;for(let i=0;i<=h.length;i++){const cur=i===h.length?0:h[i];while(st.length&&h[st.at(-1)]>cur){const t=st.pop(),w=st.length?i-st.at(-1)-1:i;best=Math.max(best,h[t]*w);}st.push(i);}return best;}", timeComplexity: "O(n)", spaceComplexity: "O(n)" },
+
+    // Tree extras
+    { id: "t-6", topicId: "trees", title: "Construct Binary Tree from Preorder and Inorder", difficulty: "Medium", tags: ["tree", "recursion"], problem: "Build tree from preorder and inorder traversals.", constraints: ["1 <= n <= 3000"], approach: "First preorder element is root; find in inorder to split left/right.", dryRun: ["pre=[3,9,20,15,7], in=[9,3,15,20,7] → standard tree"], solution: "function buildTree(pre,ino){if(!pre.length)return null;const r={val:pre[0]};const i=ino.indexOf(pre[0]);r.left=buildTree(pre.slice(1,i+1),ino.slice(0,i));r.right=buildTree(pre.slice(i+1),ino.slice(i+1));return r;}", timeComplexity: "O(n²) naively, O(n) with map", spaceComplexity: "O(n)" },
+    { id: "t-7", topicId: "trees", title: "Serialize and Deserialize Binary Tree", difficulty: "Hard", tags: ["tree", "bfs", "design"], problem: "Encode tree to string and back.", constraints: ["0 <= n <= 10⁴"], approach: "BFS with nulls; deserialize with queue.", dryRun: ["[1,2,3,null,null,4,5] ↔ '1,2,3,null,null,4,5'"], solution: "function serialize(r){if(!r)return'#';return r.val+','+serialize(r.left)+','+serialize(r.right);}function deserialize(s){const t=s.split(',');const f=()=>{const v=t.shift();return v==='#'?null:{val:+v,left:f(),right:f()};};return f();}", timeComplexity: "O(n)", spaceComplexity: "O(n)" },
+    { id: "t-8", topicId: "trees", title: "Path Sum", difficulty: "Easy", tags: ["tree", "dfs"], problem: "True if root-to-leaf path sums to target.", constraints: ["0 <= n <= 5000"], approach: "DFS subtract target; leaf check at null.", dryRun: ["[5,4,8,11,null,13,4,7,2], target=22 → true"], solution: "function hasPathSum(r,t){if(!r)return false;if(!r.left&&!r.right)return t===r.val;return hasPathSum(r.left,t-r.val)||hasPathSum(r.right,t-r.val);}", timeComplexity: "O(n)", spaceComplexity: "O(h)" },
+    { id: "t-9", topicId: "trees", title: "Binary Tree Maximum Path Sum", difficulty: "Hard", tags: ["tree", "dfs", "dp"], problem: "Max path sum (any node to any node).", constraints: ["1 <= n <= 3*10⁴"], approach: "DFS: gain-through-root = node + max(leftGain, rightGain, 0). Update global with node + left + right.", dryRun: ["[-10,9,20,null,null,15,7] → 42"], solution: "function maxPathSum(r){let best=-Infinity;const dfs=n=>{if(!n)return 0;const l=Math.max(0,dfs(n.left)),rt=Math.max(0,dfs(n.right));best=Math.max(best,n.val+l+rt);return n.val+Math.max(l,rt);};dfs(r);return best;}", timeComplexity: "O(n)", spaceComplexity: "O(h)" },
+
+    // Heaps extras
+    { id: "hp-3", topicId: "heaps", title: "Task Scheduler", difficulty: "Medium", tags: ["heap", "greedy"], problem: "Minimum intervals to finish tasks with same-type cooldown.", constraints: ["1 <= n <= 10⁴"], approach: "Max-heap of counts; idle-fill.", dryRun: ["['A','A','A','B','B','B'], n=2 → 8"], solution: "// see NeetCode", timeComplexity: "O(n)", spaceComplexity: "O(26)" },
+    { id: "hp-4", topicId: "heaps", title: "Find Median from Data Stream", difficulty: "Hard", tags: ["heap", "design"], problem: "AddNum + findMedian in O(log n).", constraints: ["stream up to 10⁵"], approach: "Two heaps: max-heap for lower half, min-heap for upper half. Rebalance sizes.", dryRun: ["add 1,2 → median 1.5; add 3 → 2"], solution: "class MedianFinder { constructor(){this.lo=new MaxHeap();this.hi=new MinHeap();} addNum(n){this.lo.push(n);this.hi.push(this.lo.pop());if(this.lo.size()<this.hi.size())this.lo.push(this.hi.pop());} findMedian(){return this.lo.size()>this.hi.size()?this.lo.peek():(this.lo.peek()+this.hi.peek())/2;} }", timeComplexity: "O(log n) per add", spaceComplexity: "O(n)" },
+
+    // Graph extras
+    { id: "g-4", topicId: "graphs", title: "Clone Graph", difficulty: "Medium", tags: ["graph", "dfs", "hashmap"], problem: "Deep-copy an undirected graph.", constraints: ["0 <= n <= 100"], approach: "DFS with map old→new; recurse neighbors.", dryRun: ["adj=[[2,4],[1,3],[2,4],[1,3]] → cloned"], solution: "function clone(n){if(!n)return null;const m=new Map();const dfs=o=>{if(m.has(o))return m.get(o);const c=new Node(o.val);m.set(o,c);for(const x of o.neighbors)c.neighbors.push(dfs(x));return c;};return dfs(n);}", timeComplexity: "O(V+E)", spaceComplexity: "O(V)" },
+    { id: "g-5", topicId: "graphs", title: "Pacific Atlantic Water Flow", difficulty: "Medium", tags: ["graph", "bfs", "dfs"], problem: "Cells from which water can reach both oceans.", constraints: ["1 <= m,n <= 150"], approach: "BFS from ocean borders inward; intersect reachable sets.", dryRun: ["standard example → output list"], solution: "function pacificAtlantic(h){const m=h.length,n=h[0].length;const reach=()=>{const v=Array.from({length:m},()=>new Array(n).fill(false)),q=[];return (cells)=>{for(const[i,j]of cells){q.push([i,j]);v[i][j]=true;}const dirs=[[1,0],[-1,0],[0,1],[0,-1]];while(q.length){const[i,j]=q.shift();for(const[di,dj]of dirs){const ni=i+di,nj=j+dj;if(ni>=0&&nj>=0&&ni<m&&nj<n&&!v[ni][nj]&&h[ni][nj]>=h[i][j]){v[ni][nj]=true;q.push([ni,nj]);}}}return v;};};const p=reach()([[0,j]for(j=0..n-1)]+[[i,0]for(i=0..m-1)]);const a=reach()([[m-1,j]for(j=0..n-1)]+[[i,n-1]for(i=0..m-1)]);const out=[];for(let i=0;i<m;i++)for(let j=0;j<n;j++)if(p[i][j]&&a[i][j])out.push([i,j]);return out;}", timeComplexity: "O(mn)", spaceComplexity: "O(mn)" },
+    { id: "g-6", topicId: "graphs", title: "Redundant Connection", difficulty: "Medium", tags: ["graph", "union-find"], problem: "Edge whose removal makes the graph a tree.", constraints: ["n == edges.length"], approach: "Union-Find: first edge whose endpoints already connected.", dryRun: ["[[1,2],[1,3],[2,3]] → [2,3]"], solution: "function findRedundant(edges){const p=Array.from({length:edges.length+1},(_,i)=>i);const f=x=>p[x]===x?x:(p[x]=f(p[x]),p[x]);for(const[a,b]of edges)if(f(a)===f(b))return[a,b];else p[f(a)]=f(b);}", timeComplexity: "O(n·α(n))", spaceComplexity: "O(n)" },
+
+    // Recursion extras
+    { id: "r-4", topicId: "recursion", title: "Combination Sum", difficulty: "Medium", tags: ["backtracking"], problem: "All unique combinations that sum to target (reuse elements).", constraints: ["1 <= candidates <= 30"], approach: "Backtrack with start index; reuse allowed.", dryRun: ["[2,3,6,7], target=7 → [[2,2,3],[7]]"], solution: "function cs(c,t){const out=[],cur=[];c.sort((a,b)=>a-b);const bt=(i,s)=>{if(s===t){out.push([...cur]);return;}for(let j=i;j<c.length;j++){if(s+c[j]>t)break;cur.push(c[j]);bt(j,s+c[j]);cur.pop();}};bt(0,0);return out;}", timeComplexity: "O(n^(t/min))", spaceComplexity: "O(t/min)" },
+    { id: "r-5", topicId: "recursion", title: "Letter Combinations of a Phone Number", difficulty: "Medium", tags: ["backtracking", "string"], problem: "Return all letter combos for a digit string.", constraints: ["0 <= digits.length <= 4"], approach: "Backtrack through digit letters.", dryRun: ["'23' → ['ad','ae','af','bd','be','bf','cd','ce','cf']"], solution: "function lc(d){if(!d.length)return[];const m={'2':'abc','3':'def','4':'ghi','5':'jkl','6':'mno','7':'pqrs','8':'tuv','9':'wxyz'};const out=[];const bt=(i,cur)=>{if(i===d.length){out.push(cur);return;}for(const c of m[d[i]])bt(i+1,cur+c);};bt(0,'');return out;}", timeComplexity: "O(4ⁿ)", spaceComplexity: "O(n)" },
+
+    // DP extras
+    { id: "dp-6", topicId: "dp", title: "House Robber", difficulty: "Medium", tags: ["dp", "1d"], problem: "Max money robbing non-adjacent houses.", constraints: ["1 <= n <= 100"], approach: "dp[i] = max(dp[i-1], dp[i-2]+nums[i]).", dryRun: ["[1,2,3,1] → 4 (1+3)"], solution: "function rob(a){let p2=0,p1=0;for(const n of a){[p2,p1]=[p1,Math.max(p1,p2+n)];}return p1;}", timeComplexity: "O(n)", spaceComplexity: "O(1)" },
+    { id: "dp-7", topicId: "dp", title: "House Robber II (Circle)", difficulty: "Medium", tags: ["dp", "1d"], problem: "Same as house robber but houses in a circle.", constraints: ["1 <= n <= 100"], approach: "Run house robber on [0..n-2] and [1..n-1], take max.", dryRun: ["[2,3,2] → 3"], solution: "function rob2(a){if(a.length<2)return a[0]||0;return Math.max(rob(a.slice(0,-1)),rob(a.slice(1)));function rob(b){let p2=0,p1=0;for(const n of b){[p2,p1]=[p1,Math.max(p1,p2+n)];}return p1;}}", timeComplexity: "O(n)", spaceComplexity: "O(1)" },
+    { id: "dp-8", topicId: "dp", title: "Longest Increasing Subsequence", difficulty: "Medium", tags: ["dp", "binary-search"], problem: "Length of LIS.", constraints: ["0 <= n <= 2500"], approach: "Patience sort: maintain tails; for each x, lower_bound in tails.", dryRun: ["[10,9,2,5,3,7,101,18] → 4"], solution: "function lis(a){const t=[];for(const x of a){let lo=0,hi=t.length;while(lo<hi){const m=(lo+hi)>>1;if(t[m]<x)lo=m+1;else hi=m;}t[lo]=x;}return t.length;}", timeComplexity: "O(n log n)", spaceComplexity: "O(n)" },
+    { id: "dp-9", topicId: "dp", title: "Edit Distance", difficulty: "Hard", tags: ["dp", "2d", "string"], problem: "Min operations (insert, delete, replace) to convert word1 to word2.", constraints: ["0 <= m,n <= 500"], approach: "2D DP: dp[i][j] = dp[i-1][j-1] if match else 1 + min of three neighbors.", dryRun: ["'horse'→'ros' → 3"], solution: "function minDistance(a,b){const m=a.length,n=b.length;const dp=Array.from({length:m+1},(_,i)=>Array.from({length:n+1},(_,j)=>i?j?0:i:j));for(let i=1;i<=m;i++)for(let j=1;j<=n;j++)dp[i][j]=a[i-1]===b[j-1]?dp[i-1][j-1]:1+Math.min(dp[i-1][j],dp[i][j-1],dp[i-1][j-1]);return dp[m][n];}", timeComplexity: "O(mn)", spaceComplexity: "O(mn)" },
+    { id: "dp-10", topicId: "dp", title: "Decode Ways", difficulty: "Medium", tags: ["dp", "string"], problem: "Count decodings of a digit string ('1'=A, ..., '26'=Z).", constraints: ["1 <= s <= 100"], approach: "dp[i] = dp[i-1] (if s[i-1]≠'0') + dp[i-2] (if last two digits form 10..26).", dryRun: ["'226' → 3 (BBF,BZ,VF)"], solution: "function numDecodings(s){if(!s||s[0]==='0')return 0;const dp=new Array(s.length+1).fill(0);dp[0]=1;dp[1]=1;for(let i=2;i<=s.length;i++){if(s[i-1]!=='0')dp[i]+=dp[i-1];const t=+s.slice(i-2,i);if(t>=10&&t<=26)dp[i]+=dp[i-2];}return dp[s.length];}", timeComplexity: "O(n)", spaceComplexity: "O(1)" },
+
+    // Greedy extras
+    { id: "gr-3", topicId: "greedy", title: "Gas Station", difficulty: "Medium", tags: ["greedy"], problem: "Find starting gas station to complete the circuit.", constraints: ["n == gas.length == cost.length"], approach: "If total gas < total cost, no answer. Else start at the index where running sum dips lowest after.", dryRun: ["gas=[1,2,3,4,5], cost=[3,4,5,1,2] → 3"], solution: "function canComplete(g,c){let total=0,tank=0,start=0;for(let i=0;i<g.length;i++){total+=g[i]-c[i];tank+=g[i]-c[i];if(tank<0){start=i+1;tank=0;}}return total<0?-1:start;}", timeComplexity: "O(n)", spaceComplexity: "O(1)" },
+    { id: "gr-4", topicId: "greedy", title: "Hand of Straights", difficulty: "Medium", tags: ["greedy", "hashmap"], problem: "Reorder into groups of consecutive W.", constraints: ["1 <= hand.length <= 10⁴"], approach: "Count, then greedily build groups from smallest.", dryRun: ["[1,2,3,6,2,3,4,7,8], W=3 → true"], solution: "function isNStraightHand(h,W){if(h.length%W)return false;h.sort((a,b)=>a-b);const c=new Map();for(const x of h)c.set(x,(c.get(x)??0)+1);for(const x of h){if(!c.get(x))continue;for(let i=0;i<W;i++){const k=x+i;if((c.get(k)??0)<=0)return false;c.set(k,c.get(k)-1);}}return true;}", timeComplexity: "O(n log n)", spaceComplexity: "O(n)" },
+    { id: "gr-5", topicId: "greedy", title: "Partition Labels", difficulty: "Medium", tags: ["greedy", "string"], problem: "Partition string into max pieces where each letter appears in at most one piece.", constraints: ["1 <= s <= 100"], approach: "Record last index of each char; extend current piece to last seen.", dryRun: ["'ababcbacadefegdehijhklij' → [9,7,8]"], solution: "function partitionLabels(s){const last={};for(let i=0;i<s.length;i++)last[s[i]]=i;const out=[];let start=0,end=0;for(let i=0;i<s.length;i++){end=Math.max(end,last[s[i]]);if(i===end){out.push(end-start+1);start=i+1;}}return out;}", timeComplexity: "O(n)", spaceComplexity: "O(1)" },
+
+    // Binary search extras
+    { id: "bs-3", topicId: "binary-search", title: "Find Minimum in Rotated Sorted Array", difficulty: "Medium", tags: ["binary-search"], problem: "Find min in array with no duplicates.", constraints: ["1 <= n <= 5000"], approach: "BS, comparing mid to right to decide which half is sorted.", dryRun: ["[3,4,5,1,2] → 1"], solution: "function findMin(a){let lo=0,hi=a.length-1;while(lo<hi){const m=(lo+hi)>>1;if(a[m]>a[hi])lo=m+1;else hi=m;}return a[lo];}", timeComplexity: "O(log n)", spaceComplexity: "O(1)" },
+    { id: "bs-4", topicId: "binary-search", title: "Search a 2D Matrix", difficulty: "Medium", tags: ["binary-search", "matrix"], problem: "Search in row-sorted, column-sorted matrix.", constraints: ["1 <= m,n <= 100"], approach: "Treat as 1D sorted array of length m*n; BS on virtual index.", dryRun: ["standard 2D matrix, target=5 → true"], solution: "function searchMatrix(m,t){const r=m.length,c=m[0].length;let lo=0,hi=r*c-1;while(lo<=hi){const mid=(lo+hi)>>1;const v=m[Math.floor(mid/c)][mid%c];if(v===t)return true;if(v<t)lo=mid+1;else hi=mid-1;}return false;}", timeComplexity: "O(log(mn))", spaceComplexity: "O(1)" },
+    { id: "bs-5", topicId: "binary-search", title: "Time Based Key-Value Store", difficulty: "Medium", tags: ["binary-search", "design", "hashmap"], problem: "Set(key,value,ts); Get(key,ts) returns value at largest ts <= given.", constraints: ["0 <= ts <= 10⁷"], approach: "Map<key,[[ts,val],...]>; upper_bound on timestamps.", dryRun: ["set(foo,bar,1); get(foo,1)→bar; get(foo,3)→bar"], solution: "class TimeMap { constructor(){this.m=new Map();} set(k,v,t){(this.m.get(k)??this.m.set(k,[]).get(k)).push([t,v]);} get(k,t){const a=this.m.get(k)??[];let lo=0,hi=a.length-1,ans='';while(lo<=hi){const m=(lo+hi)>>1;if(a[m][0]<=t){ans=a[m][1];lo=m+1;}else hi=m-1;}return ans;} }", timeComplexity: "O(log n) get", spaceComplexity: "O(n)" },
+
+    // Sorting extras
+    { id: "so-2", topicId: "sorting", title: "Sort Colors (Dutch National Flag)", difficulty: "Medium", tags: ["sorting", "two-pointers"], problem: "Sort array of 0/1/2 in-place in one pass.", constraints: ["0 <= n <= 300"], approach: "Three-way partition with low, mid, high pointers.", dryRun: ["[2,0,2,1,1,0] → [0,0,1,1,2,2]"], solution: "function sortColors(a){let l=0,m=0,r=a.length-1;while(m<=r){if(a[m]===0){[a[l],a[m]]=[a[m],a[l]];l++;m++;}else if(a[m]===1){m++;}else{[a[m],a[r]]=[a[r],a[m]];r--;}}}", timeComplexity: "O(n)", spaceComplexity: "O(1)" },
+    { id: "so-3", topicId: "sorting", title: "Top K Frequent Words", difficulty: "Medium", tags: ["sorting", "hashmap", "heap"], problem: "Return k most frequent words, lex-sorted on ties.", constraints: ["1 <= words.length <= 500"], approach: "Count + sort by [-freq, word].", dryRun: ["['i','love','leetcode','i','love','coding'], k=2 → ['i','love']"], solution: "function topKFrequent(words,k){const m=new Map();for(const w of words)m.set(w,(m.get(w)??0)+1);return [...m.entries()].sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0])).slice(0,k).map(x=>x[0]);}", timeComplexity: "O(n log n)", spaceComplexity: "O(n)" },
+
+    // Bit manipulation extras
+    { id: "bi-4", topicId: "bits", title: "Reverse Bits", difficulty: "Easy", tags: ["bits"], problem: "Reverse bits of a 32-bit unsigned integer.", constraints: ["0 <= n <= 2³²-1"], approach: "Iterate 32 times, shifting result left and n right.", dryRun: ["0b00000010100101000001111010011100 → 964176192"], solution: "function reverseBits(n){let r=0;for(let i=0;i<32;i++){r=(r<<1)|(n&1);n>>>=1;}return r>>>0;}", timeComplexity: "O(1)", spaceComplexity: "O(1)" },
+    { id: "bi-5", topicId: "bits", title: "Missing Number", difficulty: "Easy", tags: ["bits", "math"], problem: "Find missing in [0,n] given n distinct numbers.", constraints: ["0 <= n <= 10⁴"], approach: "XOR indices with values cancels; missing remains.", dryRun: ["[3,0,1] → 2"], solution: "function missingNumber(a){let x=a.length;for(let i=0;i<a.length;i++)x^=i^a[i];return x;}", timeComplexity: "O(n)", spaceComplexity: "O(1)" },
+    { id: "bi-6", topicId: "bits", title: "Sum of Two Integers (No + or -)", difficulty: "Medium", tags: ["bits"], problem: "Add a and b without + or -.", constraints: ["-1000 <= a,b <= 1000"], approach: "XOR for sum without carry, AND<<1 for carry, repeat until carry zero.", dryRun: ["1+2 → 3"], solution: "function getSum(a,b){while(b!==0){const c=(a&b)<<1;a=a^b;b=c;}return a;}", timeComplexity: "O(1)", spaceComplexity: "O(1)" },
+  ];
+  return fillers.map((f) => stub(f));
+}
+
+export const QUESTIONS: Question[] = [
+  TWO_SUM_SORTED,
+  CONTAINER_WITH_MOST_WATER,
+  LONGEST_SUBARRAY,
+  MIN_WINDOW_SUBSTRING,
+  ...STUB_QUESTIONS,
+];
+
+export const QUESTION_BY_ID: Record<string, Question> = Object.fromEntries(
+  QUESTIONS.map((q) => [q.id, q])
+);

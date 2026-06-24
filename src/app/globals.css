@@ -1,26 +1,258 @@
 @import "tailwindcss";
 
+/* ─── Design tokens ─────────────────────────────────────────────────────────
+   Palette: "Midnight Workshop" — deep cool surfaces with a single teal accent.
+   Difficulty, status, and viz states each get distinct hue families so they
+   never collide. A light variant is provided via data-theme="light".
+   ─────────────────────────────────────────────────────────────────────────── */
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Surface ladder — proper elevation, each step perceptibly lifted */
+  --surface-0: #0B0F14;   /* page bg */
+  --surface-1: #11161D;   /* sidebar */
+  --surface-2: #161C24;   /* card */
+  --surface-3: #1E2530;   /* hover */
+  --surface-4: #28303D;   /* active/pressed */
+  --surface-5: #323B4A;   /* elevated (dropdown) */
+
+  /* Borders — translucent white, scales with surface */
+  --border-subtle: rgba(255, 255, 255, 0.05);
+  --border-default: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.14);
+
+  /* Text — rgba alphas, slightly cooler to match teal accent */
+  --text-primary: rgba(240, 246, 252, 0.92);
+  --text-secondary: rgba(200, 215, 230, 0.66);
+  --text-tertiary: rgba(170, 185, 200, 0.42);
+  --text-disabled: rgba(150, 165, 180, 0.28);
+
+  /* Single accent — teal/cyan. Used ONLY for: active states, primary CTAs,
+     focus rings, code-line sync, animation pointers, progress fills. */
+  --accent: #5EEAD4;
+  --accent-strong: #2DD4BF;
+  --accent-hover: #99F6E4;
+  --accent-soft: rgba(94, 234, 212, 0.12);
+  --accent-glow: rgba(94, 234, 212, 0.32);
+
+  /* Difficulty — emerald / amber / rose. Distinct, no overlap with accent. */
+  --diff-easy: #34D399;
+  --diff-medium: #FBBF24;
+  --diff-hard: #FB7185;
+
+  /* Progress status — three distinct hues that don't repeat accent/difficulty. */
+  --status-confident: #5EEAD4;   /* teal — matches accent, "you're done" */
+  --status-revisited: #C4B5FD;   /* lavender — "needs another look" */
+  --status-not-started: rgba(255, 255, 255, 0.16);
+
+  /* Algorithm viz semantic states — Tableau-derived, colorblind-safe.
+     These are the ONLY place these hues appear, so they don't compete. */
+  --state-default: #1E2530;       /* same as hover surface — cell bg */
+  --state-active: #5EEAD4;       /* pointer i — teal (matches accent) */
+  --state-active-alt: #F472B6;   /* pointer j — pink (high contrast w/ teal) */
+  --state-comparing: #FBBF24;    /* two cells being compared — amber */
+  --state-considered: #34D399;   /* DP: kept / matched — emerald */
+  --state-rejected: #F87171;     /* DP: not the max — coral */
+  --state-matched: #C4B5FD;      /* substring match / BST found — lavender */
+  --state-window: rgba(94, 234, 212, 0.14);
+  --state-considered-soft: rgba(52, 211, 153, 0.18);
+  --state-rejected-soft: rgba(248, 113, 113, 0.18);
+
+  /* Bar-chart mode (e.g. "Container With Most Water"). */
+  --state-bar: #2DD4BF;            /* bar fill — matches accent-strong */
+  --state-bar-soft: rgba(45, 212, 191, 0.32);
+  --state-bar-stroke: #5EEAD4;
+  --state-water: rgba(94, 234, 212, 0.22); /* translucent water between L & R */
+
+  /* Spacing scale (4px base) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+
+  /* Radius scale */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+
+  /* Motion scale */
+  --motion-fast: 120ms;
+  --motion-base: 200ms;
+  --motion-slow: 350ms;
+}
+
+/* ─── Light theme override ───────────────────────────────────────────────── */
+[data-theme="light"] {
+  --surface-0: #FDFCF8;
+  --surface-1: #FFFFFF;
+  --surface-2: #F7F5F0;
+  --surface-3: #EFEBE3;
+  --surface-4: #E6E2DA;
+  --surface-5: #DED9CE;
+
+  --border-subtle: rgba(0, 0, 0, 0.05);
+  --border-default: rgba(0, 0, 0, 0.08);
+  --border-strong: rgba(0, 0, 0, 0.14);
+
+  --text-primary: rgba(26, 26, 26, 0.92);
+  --text-secondary: rgba(60, 60, 60, 0.70);
+  --text-tertiary: rgba(110, 110, 110, 0.50);
+  --text-disabled: rgba(140, 140, 140, 0.30);
+
+  --accent: #2563EB;
+  --accent-strong: #1D4ED8;
+  --accent-hover: #1E40AF;
+  --accent-soft: rgba(37, 99, 235, 0.10);
+  --accent-glow: rgba(37, 99, 235, 0.22);
+
+  --diff-easy: #059669;
+  --diff-medium: #D97706;
+  --diff-hard: #DC2626;
+
+  --status-confident: #2563EB;
+  --status-revisited: #7C3AED;
+  --status-not-started: rgba(0, 0, 0, 0.12);
+
+  --state-default: #E6E2DA;
+  --state-active: #2563EB;
+  --state-active-alt: #DB2777;
+  --state-comparing: #D97706;
+  --state-considered: #059669;
+  --state-rejected: #DC2626;
+  --state-matched: #7C3AED;
+  --state-window: rgba(37, 99, 235, 0.12);
+  --state-considered-soft: rgba(5, 150, 105, 0.14);
+  --state-rejected-soft: rgba(220, 38, 38, 0.14);
+
+  --state-bar: #1D4ED8;
+  --state-bar-soft: rgba(37, 99, 235, 0.26);
+  --state-bar-stroke: #2563EB;
+  --state-water: rgba(37, 99, 235, 0.18);
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-background: var(--surface-0);
+  --color-surface: var(--surface-2);
+  --color-surface-2: var(--surface-3);
+  --color-surface-3: var(--surface-4);
+  --color-border: var(--border-default);
+  --color-border-subtle: var(--border-subtle);
+  --color-border-strong: var(--border-strong);
+  --color-foreground: var(--text-primary);
+  --color-muted: var(--text-secondary);
+  --color-subtle: var(--text-tertiary);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-soft: var(--accent-soft);
+  --color-easy: var(--diff-easy);
+  --color-medium: var(--diff-medium);
+  --color-hard: var(--diff-hard);
+  --color-state-active: var(--state-active);
+  --color-state-comparing: var(--state-comparing);
+  --color-state-considered: var(--state-considered);
+  --color-state-rejected: var(--state-rejected);
+  --color-state-matched: var(--state-matched);
+  --color-status-confident: var(--status-confident);
+  --color-status-revisited: var(--status-revisited);
+
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+* { border-color: var(--border-default); }
+
+html, body {
+  background: var(--surface-0);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-feature-settings: "cv11", "ss01", "ss03";
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+/* Reading column — used by long prose blocks (~65-70ch) */
+.prose-col { max-width: 68ch; }
+
+/* Subtle scrollbar */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--border-default);
+  border-radius: 999px;
+  border: 2px solid var(--surface-0);
+}
+::-webkit-scrollbar-thumb:hover { background: var(--border-strong); }
+
+/* Focus-visible halo — accent */
+:focus { outline: none; }
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--accent-soft);
+  border-radius: 6px;
+}
+
+/* Code-related */
+pre, code, kbd, samp {
+  font-family: var(--font-mono);
+  font-feature-settings: "calt" 1, "liga" 1;
+}
+code {
+  font-size: 0.875em;
+  font-weight: 500;
+  padding: 0.15em 0.4em;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.05);
+  border: 1px solid var(--border-subtle);
+}
+[data-theme="light"] code {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+/* Syntax tokens — each a distinct hue not used elsewhere in the app */
+.tk-kw  { color: #A5B4FC; }   /* keywords — soft indigo (distinct from status lavender) */
+.tk-fn  { color: #5EEAD4; }   /* function names — teal */
+.tk-str { color: #6EE7B7; }   /* strings — soft emerald */
+.tk-num { color: #FCD34D; }   /* numbers — soft amber */
+.tk-cmt { color: var(--text-tertiary); font-style: italic; }
+.tk-op  { color: var(--text-secondary); }
+.tk-var { color: var(--text-primary); }
+.tk-const { color: #F9A8D4; }  /* true/false/null — pink */
+
+[data-theme="light"] .tk-kw  { color: #4F46E5; }
+[data-theme="light"] .tk-fn  { color: #2563EB; }
+[data-theme="light"] .tk-str { color: #047857; }
+[data-theme="light"] .tk-num { color: #B45309; }
+[data-theme="light"] .tk-const { color: #BE185D; }
+
+.tabular { font-variant-numeric: tabular-nums; }
+
+::selection {
+  background: var(--accent-soft);
+  color: var(--text-primary);
+}
+
+.cm-editor { height: 100%; }
+.cm-scroller { overflow: auto; }
+
+/* Resize handle helpers */
+.cursor-col-resize { cursor: col-resize; }
+.cursor-row-resize { cursor: row-resize; }
+
+/* Kill all motion under reduced-motion */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
